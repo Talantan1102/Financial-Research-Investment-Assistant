@@ -1,4 +1,5 @@
 import { getAuthToken } from './auth-token'
+import type { RunResumeResponse } from '@/types/paper-trading'
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) ?? ''
 
@@ -84,12 +85,14 @@ export interface RunSessionDetail extends RunSessionSummary {
   has_more: boolean
   active_run_id: string | null
   active_run_status: RunStatus | null
+  active_pause_id: string | null
   active_pause_type: 'approval' | 'input' | null
   active_pause_request: Record<string, unknown> | null
   revisions: RunRevision[]
   revisions_has_more?: boolean
   revisions_next_cursor?: string | null
   latest_run_id: string | null
+  latest_run_status: RunStatus | null
 }
 
 export interface RunRevision {
@@ -153,7 +156,8 @@ export function cancelRun(
 export function resumeRun(
   tenantId: string,
   runId: string,
-  response: Record<string, unknown>,
+  pauseId: string,
+  response: RunResumeResponse,
   fetchImpl: typeof fetch = fetch,
 ): Promise<RunResponse> {
   return jsonRequest(
@@ -161,7 +165,7 @@ export function resumeRun(
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ response }),
+      body: JSON.stringify({ pause_id: pauseId, response }),
     },
     fetchImpl,
   )

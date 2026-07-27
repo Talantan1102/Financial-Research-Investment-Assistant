@@ -6,11 +6,12 @@ from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from uuid import UUID
 
-from fastapi import FastAPI, Header, HTTPException, Request, status
-from sqlalchemy import text
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from sqlalchemy import select, text
 
 from app.core.async_database import build_async_database
 from app.core.security import decode_token
+from app.models.tenant import TenantMembership
 from app.router.auth_router import get_current_user_required
 from app.router.runs import router as runs_router
 
@@ -40,6 +41,29 @@ async def _run_control_actor(authorization: str | None = Header(default=None)) -
 
 
 app.dependency_overrides[get_current_user_required] = _run_control_actor
+
+
+@app.get("/auth/me")
+async def get_run_control_actor(
+    actor: SimpleNamespace = Depends(get_current_user_required),
+) -> dict[str, str]:
+    """Read-only identity preflight for durable eval and operational clients."""
+    return {"id": str(actor.id)}
+
+
+@app.get("/api/v1/tenants")
+async def list_run_control_actor_tenants(
+    request: Request,
+    actor: SimpleNamespace = Depends(get_current_user_required),
+) -> list[dict[str, str]]:
+    """Return tenant memberships without exposing a mutation surface."""
+    async with request.app.state.async_session_factory() as session:
+        tenant_ids = (
+            await session.scalars(
+                select(TenantMembership.tenant_id).where(TenantMembership.user_id == actor.id)
+            )
+        ).all()
+    return [{"id": str(tenant_id)} for tenant_id in tenant_ids]
 
 
 @app.get("/healthz")

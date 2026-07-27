@@ -11,13 +11,13 @@ from __future__ import annotations
 import json
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class StepToolCall(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    id: str
+    id: str = Field(min_length=1, max_length=255)
     name: str
     arguments: str  # 原始 JSON 串(流式分片拼接产物)
 

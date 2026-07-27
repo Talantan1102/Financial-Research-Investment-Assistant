@@ -13,6 +13,12 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, R
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.chatloop.approval_edits import SchemaEditableApprovalValidator
+from app.chatloop.paper_trade_schemas import (
+    CancelPaperOrderArgs,
+    PlacePaperOrderArgs,
+    ResetPaperAccountArgs,
+)
 from app.models.run import RunEvent
 from app.models.user import User
 from app.router.auth_router import get_current_user_required
@@ -44,7 +50,16 @@ def get_run_service(request: Request) -> RunService:
         async_sessionmaker[AsyncSession],
         request.app.state.async_session_factory,
     )
-    return RunService(factory)
+    return RunService(
+        factory,
+        editable_approval_validator=SchemaEditableApprovalValidator(
+            {
+                "place_paper_order": PlacePaperOrderArgs,
+                "cancel_paper_order": CancelPaperOrderArgs,
+                "reset_paper_account": ResetPaperAccountArgs,
+            }
+        ),
+    )
 
 
 def get_run_stream_bus(request: Request) -> RunStreamBus | None:
@@ -418,6 +433,7 @@ async def resume_run(
             tenant_id,
             run_id,
             cast(UUID, current_user.id),
+            pause_id=body.pause_id,
             response=body.response,
         )
     except RunControlError as exc:

@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from typing import cast
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import aliased
 
@@ -36,6 +36,7 @@ class RunSessionDetail:
     revisions_has_more: bool
     revisions_next_cursor: str | None
     latest_run_id: UUID | None
+    latest_run_status: str | None
 
 
 class RunSessionService:
@@ -75,6 +76,10 @@ class RunSessionService:
         revision_cursor: str | None = None,
     ) -> RunSessionDetail:
         async with self._session_factory() as session, session.begin():
+            # This service owns a fresh Session for the detail request. Set the
+            # isolation level before its first read so authorization, messages,
+            # Run control state, and revisions share one PostgreSQL snapshot.
+            await session.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ"))
             run_session = await self._get_visible_session(session, tenant_id, session_id, actor_id)
             parent = aliased(Run)
             child = aliased(Run)
@@ -111,32 +116,54 @@ class RunSessionService:
                 .limit(limit + 1)
             )
             messages = tuple(rows.all())
-            active_run = await session.scalar(
-                select(Run)
-                .where(
-                    Run.tenant_id == tenant_id,
-                    Run.session_id == session_id,
-                    Run.status.in_([status.value for status in ACTIVE_RUN_STATUSES]),
-                )
-                .order_by(Run.revision_seq.desc())
+            # Recovery consumers must never combine a Run from one committed
+            # state with a pause from another. Fetch the latest Run, active Run,
+            # and its unresolved pause in one PostgreSQL statement snapshot.
+            latest = aliased(Run)
+            latest_run_id = (
+                select(latest.id)
+                .where(latest.tenant_id == tenant_id, latest.session_id == session_id)
+                .order_by(latest.revision_seq.desc())
                 .limit(1)
+                .scalar_subquery()
             )
-            active_pause = None
-            if active_run is not None:
-                active_pause = await session.scalar(
-                    select(RunPause)
-                    .where(
-                        RunPause.run_id == active_run.id,
-                        RunPause.resolved_at.is_(None),
+            recovery_rows = (
+                await session.execute(
+                    select(Run, RunPause)
+                    .outerjoin(
+                        RunPause,
+                        and_(
+                            RunPause.run_id == Run.id,
+                            RunPause.resolved_at.is_(None),
+                        ),
                     )
-                    .order_by(RunPause.pause_no.desc())
-                    .limit(1)
+                    .where(
+                        Run.tenant_id == tenant_id,
+                        Run.session_id == session_id,
+                        or_(
+                            Run.status.in_([status.value for status in ACTIVE_RUN_STATUSES]),
+                            Run.id == latest_run_id,
+                        ),
+                    )
+                    .order_by(Run.revision_seq.desc(), RunPause.pause_no.desc())
                 )
-            latest_run = await session.scalar(
-                select(Run)
-                .where(Run.tenant_id == tenant_id, Run.session_id == session_id)
-                .order_by(Run.revision_seq.desc())
-                .limit(1)
+            ).all()
+            latest_run = recovery_rows[0][0] if recovery_rows else None
+            active_run = next(
+                (
+                    run
+                    for run, _pause in recovery_rows
+                    if run.status in {status.value for status in ACTIVE_RUN_STATUSES}
+                ),
+                None,
+            )
+            active_pause = next(
+                (
+                    pause
+                    for run, pause in recovery_rows
+                    if active_run is not None and run.id == active_run.id and pause is not None
+                ),
+                None,
             )
             revision_statement = select(Run).where(
                 Run.tenant_id == tenant_id, Run.session_id == session_id
@@ -221,6 +248,7 @@ class RunSessionService:
                 revisions_has_more=revisions_has_more,
                 revisions_next_cursor=revisions_next_cursor,
                 latest_run_id=None if latest_run is None else cast(UUID, latest_run.id),
+                latest_run_status=None if latest_run is None else cast(str, latest_run.status),
             )
 
     async def update_title(

@@ -19,6 +19,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
@@ -48,6 +49,12 @@ class RunToolExecution(Base):
     tool_name = Column(String(255), nullable=False)
     request_summary = Column(JSONB, nullable=False)
     safe_to_retry = Column(Boolean, nullable=False, default=False)
+    risk_level = Column(
+        String(16), nullable=False, default="unknown", server_default=text("'unknown'")
+    )
+    permission_decision = Column(
+        String(32), nullable=False, default="unknown", server_default=text("'unknown'")
+    )
     status = Column(String(32), nullable=False)
     reservation_token = Column(UUID(as_uuid=True), nullable=True)
     reservation_expires_at = Column(DateTime, nullable=True)

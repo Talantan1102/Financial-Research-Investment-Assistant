@@ -31,7 +31,7 @@ services:
       RUN_EXECUTOR_MODE: ${RUN_EXECUTOR_MODE:-simulated}
       RUN_SIMULATED_DELAY_SECONDS: ${RUN_SIMULATED_DELAY_SECONDS:-0.5}
       RUN_TOOL_RISK_CATALOG: ${RUN_TOOL_RISK_CATALOG:-v1}
-      RUN_SAFE_IDEMPOTENT_TOOLS: ${RUN_SAFE_IDEMPOTENT_TOOLS:-search_tools,memory_search,read_cached_result,get_portfolio_positions}
+      RUN_SAFE_IDEMPOTENT_TOOLS: ${RUN_SAFE_IDEMPOTENT_TOOLS:-search_tools,memory_search,read_cached_result,get_stock_quote,get_portfolio_positions,approval,get_paper_account,list_paper_orders,get_paper_order,manage_watchlist}
       RUN_CONTROL_MINIMAL_IMPORTS: "1"
       RUN_HEALTH_MAX_AGE_SECONDS: ${RUN_HEALTH_MAX_AGE_SECONDS:-3}
       RUN_HEALTH_DEPENDENCY_MAX_AGE_SECONDS: ${RUN_HEALTH_DEPENDENCY_MAX_AGE_SECONDS:-2}

@@ -14,6 +14,7 @@ ErrorKind = Literal[
     "non_zero_exit",
     "stdout_invalid_json",
     "safety_scan_rejected",
+    "sandbox_setup_failed",
     "subprocess_launch_failed",
     "stderr_overflow",
 ]

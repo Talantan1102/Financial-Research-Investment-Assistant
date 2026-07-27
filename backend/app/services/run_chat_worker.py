@@ -6,9 +6,10 @@ import asyncio
 import json
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Protocol, cast
 
+from app.chatloop.approval_edits import ApprovedInput
 from app.chatloop.contracts import ToolResult
 from app.chatloop.control_tools import ApprovalTool, AskUserTool, approval_pause, ask_user_pause
 from app.chatloop.loop import PauseDirective
@@ -133,6 +134,7 @@ class PersistentToolLedger:
         call: StepToolCall,
         *,
         safe_to_retry: bool,
+        risk_level: str,
         approved: bool,
         approved_execution_id: Any = None,
     ) -> Any:
@@ -146,6 +148,7 @@ class PersistentToolLedger:
             tool_name=call.name,
             request=request,
             safe_to_retry=safe_to_retry,
+            risk_level=risk_level,
             approved=approved,
             approved_execution_id=approved_execution_id,
         )
@@ -185,9 +188,29 @@ class ToolRiskPolicy:
     def safe_to_retry(self, tool_name: str) -> bool:
         return tool_name in self.safe_idempotent_tools
 
+    def risk_level(self, tool_name: str) -> str:
+        """Return the fail-closed runtime risk decision persisted with the reservation."""
+        if tool_name == "ask_user":
+            return "low"
+        return "low" if self.safe_to_retry(tool_name) else "high"
+
 
 SAFE_IDEMPOTENT_TOOL_CATALOG_V1 = frozenset(
-    {"search_tools", "memory_search", "read_cached_result", "get_portfolio_positions", "approval"}
+    {
+        "search_tools",
+        "memory_search",
+        "read_cached_result",
+        "get_stock_quote",
+        "get_portfolio_positions",
+        "approval",
+        "get_paper_account",
+        "list_paper_orders",
+        "get_paper_order",
+        "manage_watchlist",
+    }
+)
+EDITABLE_PAPER_WRITE_TOOLS = frozenset(
+    {"place_paper_order", "cancel_paper_order", "reset_paper_account"}
 )
 
 
@@ -237,7 +260,15 @@ class DurableApprovalController:
             question = args.get("question")
             if not isinstance(question, str) or not question.strip():
                 raise ValueError("ask_user question must not be blank")
-            return ask_user_pause(question)
+            directive = ask_user_pause(question)
+            return PauseDirective(
+                directive.pause_type,
+                {
+                    **directive.request,
+                    "risk_level": self._risk_policy.risk_level("ask_user"),
+                    "permission_decision": "direct",
+                },
+            )
         approval_calls = [call for call in tool_calls if call.name == "approval"]
         if approval_calls:
             if len(tool_calls) != 1:
@@ -272,9 +303,18 @@ class DurableApprovalController:
             "approval",
             {
                 "tool_calls": [
-                    {"id": call.id, "name": call.name, "arguments": call.arguments}
+                    {
+                        "id": call.id,
+                        "name": call.name,
+                        "arguments": call.arguments,
+                        "risk_level": self._risk_policy.risk_level(call.name),
+                        "permission_decision": "approval_required",
+                    }
                     for call in risky
-                ]
+                ],
+                "editable_tool_call_ids": [
+                    call.id for call in risky if call.name in EDITABLE_PAPER_WRITE_TOOLS
+                ],
             },
         )
 
@@ -297,6 +337,7 @@ class DurableToolHub:
         risk_policy: ToolRiskPolicy,
         approved_semantic_keys: frozenset[str] = frozenset(),
         approved_tool_executions: Mapping[str, Any] | None = None,
+        trusted_recovery_inputs: Mapping[str, Mapping[str, Any]] | None = None,
     ) -> None:
         self._delegate = delegate
         self._ledger = ledger
@@ -304,6 +345,9 @@ class DurableToolHub:
         self._risk_policy = risk_policy
         self._approved_semantics = approved_semantic_keys
         self._approved_executions = dict(approved_tool_executions or {})
+        self._trusted_recovery_inputs = {
+            key: dict(value) for key, value in (trusted_recovery_inputs or {}).items()
+        }
 
     def schemas_for_llm(self) -> list[dict[str, Any]]:
         return cast(list[dict[str, Any]], self._delegate.schemas_for_llm())
@@ -321,6 +365,7 @@ class DurableToolHub:
             reservation = await self._ledger.reserve(
                 call,
                 safe_to_retry=safe,
+                risk_level=self._risk_policy.risk_level(call.name),
                 approved=call.id in self._approved or semantic_approved,
                 approved_execution_id=self._approved_executions.get(call.id),
             )
@@ -341,6 +386,17 @@ class DurableToolHub:
                 continue
             executable.append(call)
             executable_slots.append((index, reservation))
+
+        for call in executable:
+            trusted = self._trusted_recovery_inputs.get(call.id)
+            if trusted is None:
+                continue
+            if call.id not in self._approved_executions or self._safe_args(call) != trusted:
+                raise RuntimeError("trusted recovery input does not match persisted execution")
+            state.approved_inputs[call.id] = ApprovedInput(
+                original=trusted,
+                effective=trusted,
+            )
 
         try:
             executed_results = await self._delegate.dispatch(executable, state)
@@ -434,6 +490,7 @@ def build_chat_executor_builder(
     ) -> ChatRunExecutor:
         approved = _approved_tool_call_ids(loaded)
         approved_executions = dict(getattr(loaded, "approved_tool_executions", ()))
+        trusted_recovery_inputs = dict(getattr(loaded, "trusted_recovery_inputs", ()))
         # Recovery approvals are resolved against durable execution ids by
         # AttemptService.  Include those call ids directly as a second source
         # of truth; this keeps approval authorization intact when a portable
@@ -452,6 +509,7 @@ def build_chat_executor_builder(
                 risk_policy,
                 loaded.approved_semantic_keys,
                 approved_executions,
+                trusted_recovery_inputs,
             )
             controller_box.append(
                 DurableApprovalController(risk_policy, approved, loaded.approved_semantic_keys)
@@ -573,6 +631,17 @@ class RunChatWorker:
             except (AttemptCommandRejected, ValueError):
                 await self._converge_invalid_approval(assignment, loaded)
                 return
+
+        if recoveries and approved_execution_ids:
+            trusted = tuple(
+                (
+                    str(row["tool_call_id"]),
+                    dict(cast(Mapping[str, Any], row["request"])),
+                )
+                for row in recoveries
+                if str(row["execution_id"]) in approved_execution_ids
+            )
+            loaded = replace(loaded, trusted_recovery_inputs=trusted)
 
         cancel_event = asyncio.Event()
         self._cancellations[assignment.attempt_id] = cancel_event

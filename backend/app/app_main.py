@@ -30,6 +30,7 @@ from app.router.knowledge_router import router as knowledge_router  # noqa: E402
 from app.router.memory_router import router as memory_router  # noqa: E402  (C.5)
 from app.router.monitoring_router import router as monitoring_router  # noqa: E402
 from app.router.observability_router import router as observability_router  # noqa: E402
+from app.router.paper_trading_router import router as paper_trading_router  # noqa: E402
 from app.router.persona_router import router as persona_router  # noqa: E402  (persona-ui)
 from app.router.portfolio_router import router as portfolio_router  # noqa: E402  (v1.0)
 from app.router.reports import router as reports_router  # noqa: E402  (v0.9.x)
@@ -37,6 +38,10 @@ from app.router.run_observability import router as run_observability_router  # n
 from app.router.run_sessions import router as run_sessions_router  # noqa: E402
 from app.router.runs import router as runs_router  # noqa: E402
 from app.router.tenants import router as tenants_router  # noqa: E402
+from app.router.watchlist_router import router as watchlist_router  # noqa: E402
+from app.scripts.migrate_paper_trading_schema import (  # noqa: E402
+    verify_paper_trading_schema_connection,
+)
 from app.scripts.migrate_phase3_execution_schema import (  # noqa: E402
     is_fresh_application_schema_connection,
     verify_run_control_schema_connection,
@@ -72,9 +77,11 @@ def _initialize_postgres_schema(database_engine: Engine | None = None) -> bool:
             if fresh_schema:
                 Base.metadata.create_all(bind=connection)
                 verify_run_control_schema_connection(connection)
+                verify_paper_trading_schema_connection(connection)
                 logger.info("Fresh PostgreSQL schema initialized and verified")
             else:
                 verify_run_control_schema_connection(connection)
+                verify_paper_trading_schema_connection(connection)
                 logger.info("Existing PostgreSQL schema verified without startup DDL")
     except OperationalError as exc:
         sqlstate = getattr(exc.orig, "sqlstate", None) or getattr(exc.orig, "pgcode", None)
@@ -380,6 +387,8 @@ app.include_router(research.router)
 app.include_router(monitoring_router)
 app.include_router(reports_router)  # v0.9.x — research reports CRUD
 app.include_router(portfolio_router)  # v1.0 — portfolio data model + onboarding
+app.include_router(paper_trading_router)
+app.include_router(watchlist_router)
 app.include_router(tenants_router)
 app.include_router(runs_router)
 app.include_router(run_sessions_router)

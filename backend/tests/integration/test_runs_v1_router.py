@@ -291,10 +291,15 @@ async def test_cancel_is_idempotent_and_invalid_resume_is_409(
     async with client_for(users["member"]) as client:
         created = await _create_run(client, tenant.id)
         run_url = f"{_run_url(tenant.id)}/{created.json()['id']}"
-        invalid_resume = await client.post(f"{run_url}/resume", json={"response": {"text": "x"}})
+        missing_identity = await client.post(f"{run_url}/resume", json={"response": {"text": "x"}})
+        invalid_resume = await client.post(
+            f"{run_url}/resume",
+            json={"pause_id": str(uuid.uuid4()), "response": {"text": "x"}},
+        )
         first_cancel = await client.post(f"{run_url}/cancel")
         second_cancel = await client.post(f"{run_url}/cancel")
 
+    assert missing_identity.status_code == 422
     assert invalid_resume.status_code == 409
     assert first_cancel.status_code == second_cancel.status_code == 200
     assert first_cancel.json()["status"] == second_cancel.json()["status"] == "cancelled"
@@ -325,7 +330,7 @@ async def test_resume_uses_authenticated_actor_and_keeps_same_run(
         RunStatus.RUNNING,
         event_type="run.running",
     )
-    await service.record_pause(
+    pause = await service.record_pause(
         tenant.id,
         run_id,
         users["member"].id,
@@ -337,15 +342,15 @@ async def test_resume_uses_authenticated_actor_and_keeps_same_run(
     async with client_for(users["member"]) as client:
         response = await client.post(
             f"{_run_url(tenant.id)}/{run_id}/resume",
-            json={"response": {"text": "1500"}},
+            json={"pause_id": str(pause.id), "response": {"text": "1500"}},
         )
         replay = await client.post(
             f"{_run_url(tenant.id)}/{run_id}/resume",
-            json={"response": {"text": "1500"}},
+            json={"pause_id": str(pause.id), "response": {"text": "1500"}},
         )
         conflict = await client.post(
             f"{_run_url(tenant.id)}/{run_id}/resume",
-            json={"response": {"text": "1600"}},
+            json={"pause_id": str(pause.id), "response": {"text": "1600"}},
         )
 
     assert response.status_code == 200
@@ -354,6 +359,113 @@ async def test_resume_uses_authenticated_actor_and_keeps_same_run(
     assert replay.status_code == 200
     assert conflict.status_code == 409
     assert "different response" in conflict.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    ("pause_kind", "pause_request", "stale_response"),
+    [
+        pytest.param("input", {"question": "second?"}, {"text": "stale"}, id="input"),
+        pytest.param("approval", {"action": "send_notice"}, {"approved": True}, id="approve"),
+        pytest.param("approval", {"action": "send_notice"}, {"approved": False}, id="reject"),
+        pytest.param(
+            "approval",
+            {
+                "tool_calls": [
+                    {
+                        "id": "trade-1",
+                        "name": "place_paper_order",
+                        "arguments": '{"quantity":100}',
+                    }
+                ],
+                "editable_tool_call_ids": ["trade-1"],
+            },
+            {
+                "approved": True,
+                "edited_arguments": {"trade-1": {"quantity": 200}},
+            },
+            id="editable",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_resume_route_rejects_stale_pause_identity_without_mutation(
+    api_context: tuple[Tenant, dict[str, User]],
+    client_for: ClientFactory,
+    async_session_factory: async_sessionmaker[AsyncSession],
+    pause_kind: str,
+    pause_request: dict[str, object],
+    stale_response: dict[str, object],
+) -> None:
+    tenant, users = api_context
+    actor = users["member"]
+    async with client_for(actor) as client:
+        created = await _create_run(client, tenant.id)
+    run_id = uuid.UUID(created.json()["id"])
+    service = RunService(async_session_factory)
+    await service.transition_run(
+        tenant.id, run_id, actor.id, RunStatus.ASSIGNED, event_type="run.assigned"
+    )
+    await service.transition_run(
+        tenant.id, run_id, actor.id, RunStatus.RUNNING, event_type="run.running"
+    )
+    first_pause = await service.record_pause(
+        tenant.id,
+        run_id,
+        actor.id,
+        PauseType.INPUT,
+        request_payload={"question": "first?"},
+        continuation_payload={"checkpoint": "first"},
+    )
+    async with client_for(actor) as client:
+        first_resume = await client.post(
+            f"{_run_url(tenant.id)}/{run_id}/resume",
+            json={"pause_id": str(first_pause.id), "response": {"text": "first"}},
+        )
+    assert first_resume.status_code == 200
+
+    await service.transition_run(
+        tenant.id, run_id, actor.id, RunStatus.ASSIGNED, event_type="run.assigned"
+    )
+    await service.transition_run(
+        tenant.id, run_id, actor.id, RunStatus.RUNNING, event_type="run.running"
+    )
+    second_pause = await service.record_pause(
+        tenant.id,
+        run_id,
+        actor.id,
+        PauseType(pause_kind),
+        request_payload=pause_request,
+        continuation_payload={"checkpoint": "second"},
+    )
+    run_before = await service.get_run(tenant.id, run_id, actor.id)
+    old_before = await service.get_pause(tenant.id, run_id, actor.id, first_pause.id)
+    current_before = await service.get_pause(tenant.id, run_id, actor.id, second_pause.id)
+    events_before = await service.list_events(tenant.id, run_id, actor.id)
+
+    async with client_for(actor) as client:
+        stale = await client.post(
+            f"{_run_url(tenant.id)}/{run_id}/resume",
+            json={"pause_id": str(first_pause.id), "response": stale_response},
+        )
+
+    assert stale.status_code == 409
+    assert "pause identity" in stale.json()["detail"]
+    run_after = await service.get_run(tenant.id, run_id, actor.id)
+    old_after = await service.get_pause(tenant.id, run_id, actor.id, first_pause.id)
+    current_after = await service.get_pause(tenant.id, run_id, actor.id, second_pause.id)
+    events_after = await service.list_events(tenant.id, run_id, actor.id)
+    assert run_after.status == run_before.status
+    assert run_after.queue_reason == run_before.queue_reason
+    assert run_after.queued_at == run_before.queued_at
+    assert old_after.response_payload == old_before.response_payload
+    assert old_after.resolved_at == old_before.resolved_at
+    assert old_after.continuation_payload == old_before.continuation_payload
+    assert current_after.response_payload == current_before.response_payload is None
+    assert current_after.resolved_at == current_before.resolved_at is None
+    assert current_after.continuation_payload == current_before.continuation_payload
+    assert [(event.seq, event.event_type, event.payload) for event in events_after] == [
+        (event.seq, event.event_type, event.payload) for event in events_before
+    ]
 
 
 def _sse_frames(body: str) -> list[dict[str, object]]:

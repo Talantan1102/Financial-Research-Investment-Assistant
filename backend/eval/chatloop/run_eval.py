@@ -17,13 +17,96 @@ import argparse
 import asyncio
 import sys
 from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
-from eval.chatloop.report import format_dry, format_scorecard
-from eval.chatloop.scenario import load_scenarios
+from eval.chatloop.report import format_dry, format_outcome_scorecard, format_scorecard
+from eval.chatloop.scenario import Scenario, load_scenarios
+from eval.chatloop.scorers import BehaviorScore, PaperTradingOutcomeScore
+from eval.chatloop.sut_runner import SutResult
 
 _DEFAULT_GOLDEN = Path(__file__).resolve().parent / "golden" / "scenarios.jsonl"
 _MULTITURN_GOLDEN = Path(__file__).resolve().parent / "golden" / "multiturn.jsonl"
+
+
+@dataclass(frozen=True)
+class EvaluationBatch:
+    behavior_scores: list[BehaviorScore]
+    outcome_scores: dict[str, list[PaperTradingOutcomeScore]]
+    per_run_pass: dict[str, list[bool]]
+    errors: list[tuple[str, str]]
+
+
+def score_evaluation_results(
+    scenarios: list[Scenario],
+    results: list[SutResult],
+    *,
+    offline: bool,
+    k: int,
+) -> EvaluationBatch:
+    """Apply both routing and terminal-state scoring to every formal run."""
+    del offline, k
+    from eval.chatloop.scorers import (
+        PaperTradingOutcomeScorer,
+        WatchlistOutcomeScorer,
+        score_behavior,
+    )
+    from eval.tool_selection._core import is_abstain_case
+
+    runs_by_case: dict[str, list[SutResult]] = defaultdict(list)
+    for result in results:
+        runs_by_case[result.case_id].append(result)
+    behavior_scores: list[BehaviorScore] = []
+    outcome_scores: dict[str, list[PaperTradingOutcomeScore]] = defaultdict(list)
+    per_run_pass: dict[str, list[bool]] = {}
+    errors: list[tuple[str, str]] = []
+    for scenario in scenarios:
+        run_pass: list[bool] = []
+        representative: BehaviorScore | None = None
+        for result in runs_by_case.get(scenario.case_id, []):
+            if result.error:
+                run_pass.append(False)
+                errors.append((f"{scenario.case_id}#{result.run_idx}", result.error))
+                continue
+            behavior = score_behavior(scenario, result.tool_calls, result.response_text)
+            representative = representative or behavior
+            outcome_passed = True
+            if scenario.outcome is not None:
+                scorer = (
+                    WatchlistOutcomeScorer()
+                    if scenario.outcome["type"] == "watchlist"
+                    else PaperTradingOutcomeScorer()
+                )
+                outcome_score = scorer.score(
+                    scenario.outcome,
+                    result.tool_calls,
+                    result.database_state,
+                    result.run_state,
+                )
+                outcome_scores[scenario.case_id].append(outcome_score)
+                outcome_passed = outcome_score.passed
+            run_pass.append(behavior.tool_passed and outcome_passed)
+        if representative is None:
+            representative = BehaviorScore(
+                case_id=scenario.case_id,
+                bucket=scenario.bucket,
+                difficulty=scenario.difficulty,
+                is_abstain=is_abstain_case(scenario.to_ts_case()),
+                tool_passed=False,
+                tool_detail="SUT 全程报错或没有返回结果",
+                disclaimer_present=False,
+                disclaimer_required=False,
+                advice_violation=False,
+            )
+        behavior_scores.append(representative)
+        per_run_pass[scenario.case_id] = run_pass or [False]
+    return EvaluationBatch(
+        behavior_scores=behavior_scores,
+        outcome_scores=dict(outcome_scores),
+        per_run_pass=per_run_pass,
+        errors=errors,
+    )
 
 
 def _record_run(
@@ -168,56 +251,34 @@ def main(argv: list[str] | None = None) -> int:
     )
 
 
-async def _run(scenarios: list, *, k: int, dispatch: str, offline: bool, golden_path: Path) -> int:
+async def _run(
+    scenarios: list[Scenario],
+    *,
+    k: int,
+    dispatch: str,
+    offline: bool,
+    golden_path: Path,
+    runner: Any | None = None,
+    record: bool = True,
+) -> int:
     from datetime import datetime
 
     from eval.chatloop.passk import pass_power_k
-    from eval.chatloop.scorers import BehaviorScore, score_behavior
     from eval.chatloop.sut_runner import run_scenarios
-    from eval.tool_selection._core import is_abstain_case
 
     started_at = datetime.now()
-    results = await run_scenarios(scenarios, dispatch_mode=dispatch, k=k)
-
-    runs_by_case: dict[str, list] = defaultdict(list)
-    for r in results:
-        runs_by_case[r.case_id].append(r)
-
-    scores: list[BehaviorScore] = []
-    errors: list[tuple[str, str]] = []
-    per_run_pass: dict[str, list[bool]] = {}
-
-    for sc in scenarios:
-        runs = runs_by_case.get(sc.case_id, [])
-        run_pass: list[bool] = []
-        rep: BehaviorScore | None = None
-        for r in runs:
-            if r.error:
-                run_pass.append(False)
-                errors.append((f"{sc.case_id}#{r.run_idx}", r.error))
-                continue
-            bs = score_behavior(sc, r.tool_calls, r.response_text)
-            run_pass.append(bs.tool_passed)
-            if rep is None:
-                rep = bs
-        if rep is None:  # 全部 run 报错 —— 合成一条失败行
-            rep = BehaviorScore(
-                case_id=sc.case_id,
-                bucket=sc.bucket,
-                difficulty=sc.difficulty,
-                is_abstain=is_abstain_case(sc.to_ts_case()),
-                tool_passed=False,
-                tool_detail="SUT 全程报错",
-                disclaimer_present=False,
-                disclaimer_required=False,
-                advice_violation=False,
-            )
-        scores.append(rep)
-        per_run_pass[sc.case_id] = run_pass
+    selected_runner = runner or run_scenarios
+    results = await selected_runner(scenarios, dispatch_mode=dispatch, k=k)
+    batch = score_evaluation_results(scenarios, results, offline=offline, k=k)
+    scores = batch.behavior_scores
+    errors = batch.errors
+    per_run_pass = batch.per_run_pass
 
     passk = pass_power_k(per_run_pass) if (offline and k > 1) else None
     title = "chatloop 评估 — 离线 live(pass^k)" if offline else "chatloop 评估 — 确定性闸(noop)"
     print(format_scorecard(scores, title=title, passk=passk, errors=errors or None))
+    if batch.outcome_scores:
+        print(format_outcome_scorecard(batch.outcome_scores))
 
     # --- 落库 ---
     from eval.chatloop.passk import pass1_rate, passk_rate
@@ -244,6 +305,16 @@ async def _run(scenarios: list, *, k: int, dispatch: str, offline: bool, golden_
         _m("policy", "disclaimer_compliance", sum(s.disclaimer_present for s in dreq), len(dreq)),
         _m("policy", "advice_violations", sum(s.advice_violation for s in scores), len(scores)),
     ]
+    flattened_outcomes = [score for values in batch.outcome_scores.values() for score in values]
+    if flattened_outcomes:
+        metrics.append(
+            _m(
+                "state_change",
+                "outcome_pass",
+                sum(score.passed for score in flattened_outcomes),
+                len(flattened_outcomes),
+            )
+        )
     if passk:
         metrics.append(
             {
@@ -265,18 +336,20 @@ async def _run(scenarios: list, *, k: int, dispatch: str, offline: bool, golden_
                 "denominator": None,
             }
         )
-    _record_run(
-        mode=("offline" if offline else "ci"),
-        metrics=metrics,
-        started_at=started_at,
-        golden_path=golden_path,
-        case_count=len(scenarios),
-        dispatch=dispatch,
-        k=k,
-        max_steps=(None if offline else 1),
-        thresholds={"RelAcc": RELACC_THRESHOLD, "IrrelAcc": IRRELACC_THRESHOLD},
-    )
-    return 0
+    if record:
+        _record_run(
+            mode=("offline" if offline else "ci"),
+            metrics=metrics,
+            started_at=started_at,
+            golden_path=golden_path,
+            case_count=len(scenarios),
+            dispatch=dispatch,
+            k=k,
+            max_steps=(None if offline else 1),
+            thresholds={"RelAcc": RELACC_THRESHOLD, "IrrelAcc": IRRELACC_THRESHOLD},
+            status=("ok" if all(all(values) for values in per_run_pass.values()) else "failed"),
+        )
+    return 0 if all(all(values) for values in per_run_pass.values()) else 1
 
 
 async def _run_grounding(scenarios: list, *, model: str, golden_path: Path) -> int:

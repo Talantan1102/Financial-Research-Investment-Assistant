@@ -318,13 +318,133 @@ async def test_detail_returns_bounded_durable_messages_in_stable_order(
     assert hidden.status_code == 404
 
     active_url = f"{_sessions_url(tenant.id)}/{sessions['member'].id}"
-    async with client_for(users["member"]) as client:
-        active_response = await client.get(active_url)
+    statements: list[str] = []
+
+    def capture_statement(
+        _connection: object,
+        _cursor: object,
+        statement: str,
+        _parameters: object,
+        _context: object,
+        _executemany: bool,
+    ) -> None:
+        statements.append(statement.lower())
+
+    async_engine = async_session_factory.kw["bind"]
+    assert isinstance(async_engine, AsyncEngine)
+    event.listen(async_engine.sync_engine, "before_cursor_execute", capture_statement)
+    try:
+        async with client_for(users["member"]) as client:
+            active_response = await client.get(active_url)
+    finally:
+        event.remove(async_engine.sync_engine, "before_cursor_execute", capture_statement)
     assert active_response.status_code == 200
     assert active_response.json()["active_run_id"] == str(active_run.id)
     assert active_response.json()["active_run_status"] == "waiting_input"
     assert active_response.json()["active_pause_type"] == "input"
+    assert active_response.json()["active_pause_id"] == str(active_pause.id)
+    assert active_response.json()["latest_run_id"] == str(active_run.id)
+    assert active_response.json()["latest_run_status"] == "waiting_input"
+    recovery_statements = [statement for statement in statements if "run_pauses" in statement]
+    assert len(recovery_statements) == 1
+    assert "join run_pauses" in recovery_statements[0]
+    assert "select runs_1.id" in recovery_statements[0]
     assert active_response.json()["active_pause_request"] == {"question": "成本价？"}
+
+
+@pytest.mark.asyncio
+async def test_detail_never_mixes_old_messages_with_a_new_terminal_run_snapshot(
+    session_api_context: tuple[Tenant, dict[str, User], dict[str, RunSession], Run],
+    client_for: ClientFactory,
+    async_session_factory: async_sessionmaker[AsyncSession],
+    pg_test_engine: Engine,
+) -> None:
+    tenant, users, sessions, run = session_api_context
+    async with async_session_factory() as session, session.begin():
+        stored = await session.get(Run, run.id, with_for_update=True)
+        assert stored is not None
+        stored.status = "running"
+        stored.finished_at = None
+        stored.final_message_id = None
+
+    statements: list[str] = []
+    writer_committed = False
+    final_message_id = uuid.uuid4()
+    finished_at = datetime(2026, 7, 24, 18, 0, 0)
+
+    def commit_terminal_after_message_read(
+        _connection: object,
+        _cursor: object,
+        statement: str,
+        _parameters: object,
+        _context: object,
+        _executemany: bool,
+    ) -> None:
+        nonlocal writer_committed
+        normalized = statement.lower()
+        statements.append(normalized)
+        if writer_committed or "from run_messages" not in normalized:
+            return
+        writer_committed = True
+        with pg_test_engine.begin() as writer:
+            writer.execute(
+                RunMessage.__table__.insert().values(
+                    id=final_message_id,
+                    tenant_id=tenant.id,
+                    session_id=sessions["member"].id,
+                    role="assistant",
+                    content="committed final answer",
+                    status="complete",
+                    created_at=finished_at,
+                )
+            )
+            writer.execute(
+                Run.__table__.update()
+                .where(Run.id == run.id)
+                .values(
+                    status="completed",
+                    final_message_id=final_message_id,
+                    finished_at=finished_at,
+                )
+            )
+
+    async_engine = async_session_factory.kw["bind"]
+    assert isinstance(async_engine, AsyncEngine)
+    event.listen(
+        async_engine.sync_engine,
+        "after_cursor_execute",
+        commit_terminal_after_message_read,
+    )
+    url = f"{_sessions_url(tenant.id)}/{sessions['member'].id}"
+    try:
+        async with client_for(users["member"]) as client:
+            concurrent = await client.get(url)
+    finally:
+        event.remove(
+            async_engine.sync_engine,
+            "after_cursor_execute",
+            commit_terminal_after_message_read,
+        )
+
+    assert concurrent.status_code == 200
+    assert statements[0].strip() == "set transaction isolation level repeatable read"
+    concurrent_payload = concurrent.json()
+    assert concurrent_payload["active_run_id"] == str(run.id)
+    assert concurrent_payload["active_run_status"] == "running"
+    assert concurrent_payload["latest_run_status"] == "running"
+    assert "committed final answer" not in {
+        message["content"] for message in concurrent_payload["messages"]
+    }
+
+    async with client_for(users["member"]) as client:
+        after_commit = await client.get(url)
+    assert after_commit.status_code == 200
+    committed_payload = after_commit.json()
+    assert committed_payload["active_run_id"] is None
+    assert committed_payload["latest_run_status"] == "completed"
+    assert "committed final answer" in {
+        message["content"] for message in committed_payload["messages"]
+    }
 
 
 @pytest.mark.asyncio

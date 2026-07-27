@@ -13,9 +13,14 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import date
 from types import MappingProxyType
-from typing import Any, Literal, Protocol, TypeAlias, cast
+from typing import Any, Literal, Protocol, TypeAlias
 from uuid import UUID
 
+from app.chatloop.approval_edits import (
+    ApprovalEditResponse,
+    apply_approved_edits,
+    build_approved_inputs,
+)
 from app.chatloop.context import ContextDeps
 from app.chatloop.continuation import ContinuationV1, PendingActionV1
 from app.chatloop.contracts import ToolResult
@@ -710,10 +715,20 @@ class ChatRunExecutor:
         decision: Literal["approve", "reject"] | Mapping[str, bool]
         pending_ids = {call.id for call in pending_tool_calls}
         requested_ids = self._requested_approval_ids(action.request, pending_ids)
+        approved_input_ids: set[str] = set()
+        edited_arguments: Mapping[str, Mapping[str, Any]] = {}
         if "approved" in response and "decisions" in response:
             raise ValueError("approval response contains conflicting decisions")
         if type(response.get("approved")) is bool:
-            approved = cast(bool, response["approved"])
+            approval = ApprovalEditResponse.model_validate(response)
+            approved = approval.approved
+            edited_arguments = approval.edited_arguments
+            edited_ids = set(approval.edited_arguments)
+            editable_ids = set(action.request.editable_tool_call_ids)
+            if not edited_ids.issubset(requested_ids) or not edited_ids.issubset(editable_ids):
+                raise ValueError("approval edits do not match editable pending tools")
+            if approved:
+                approved_input_ids = requested_ids & editable_ids
             if requested_ids == pending_ids:
                 decision = "approve" if approved else "reject"
             else:
@@ -736,6 +751,18 @@ class ChatRunExecutor:
                 call.id: decisions[call.id] if call.id in requested_ids else True
                 for call in pending_tool_calls
             }
+            approved_input_ids = {
+                call_id for call_id, approved in decisions.items() if approved
+            } & set(action.request.editable_tool_call_ids)
+        state.approved_inputs = build_approved_inputs(
+            pending_tool_calls,
+            edited_arguments,
+            approved_ids=approved_input_ids,
+        )
+        pending_tool_calls = apply_approved_edits(
+            pending_tool_calls,
+            edited_arguments,
+        )
         resume_prompt = response.get("text") or json.dumps(
             response, ensure_ascii=False, sort_keys=True
         )
@@ -848,6 +875,7 @@ class ChatRunExecutor:
         *,
         user_id: str,
         pending_tool_calls: tuple[StepToolCall, ...],
+        editable_tool_call_ids: frozenset[str] = frozenset(),
         continuation_secret: bytes,
         continuation_key_id: str,
     ) -> dict[str, Any]:
@@ -874,7 +902,10 @@ class ChatRunExecutor:
             state=state,
             pending_tool_calls=pending_tool_calls,
             pause_type="approval",
-            request={"tool_calls": [call.model_dump(mode="json") for call in pending_tool_calls]},
+            request={
+                "tool_calls": [call.model_dump(mode="json") for call in pending_tool_calls],
+                "editable_tool_call_ids": sorted(editable_tool_call_ids),
+            },
             user_id=user_id,
             continuation_secret=continuation_secret,
             continuation_key_id=continuation_key_id,

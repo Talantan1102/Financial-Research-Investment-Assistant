@@ -51,6 +51,9 @@ describe('renderMarkdown — C31 XSS prevention', () => {
     const input = '```js\nconsole.log("hello")\n```'
     const html = renderMarkdown(input)
     // Code fences should not be stripped — only <script> tags are blocked
-    expect(html).toContain('console.log')
+    const document = new DOMParser().parseFromString(html, 'text/html')
+    expect(document.querySelector('code')?.textContent).toContain(
+      'console.log',
+    )
   })
 })

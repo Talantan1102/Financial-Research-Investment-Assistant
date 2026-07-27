@@ -139,6 +139,16 @@ _FAKE_RESULTS: dict[str, dict[str, Any]] = {
     "get_fund_nav": {"ts_code": "110011.OF", "fund_type": None, "latest": None},
     "get_sector_daily": {"industry": None, "pct_chg": None},
     "trade_cal": {"action": "latest", "query_date": "20260615", "result_date": "20260612"},
+    # Paper-trading/watchlist tools are disclosed by the production tool table.
+    # These deterministic, side-effect-free results keep the cassette harness
+    # registration-complete without pretending that a write was executed.
+    "get_paper_account": {"error": "paper/watchlist tools unavailable in cassette harness"},
+    "list_paper_orders": {"error": "paper/watchlist tools unavailable in cassette harness"},
+    "get_paper_order": {"error": "paper/watchlist tools unavailable in cassette harness"},
+    "place_paper_order": {"error": "paper/watchlist tools unavailable in cassette harness"},
+    "cancel_paper_order": {"error": "paper/watchlist tools unavailable in cassette harness"},
+    "reset_paper_account": {"error": "paper/watchlist tools unavailable in cassette harness"},
+    "manage_watchlist": {"error": "paper/watchlist tools unavailable in cassette harness"},
 }
 
 

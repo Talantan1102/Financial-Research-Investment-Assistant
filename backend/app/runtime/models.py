@@ -9,6 +9,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.agents.schemas import ToolResult
+from app.chatloop.approval_edits import ApprovedInput
 
 
 class FrozenDict(dict[str, Any]):
@@ -134,6 +135,7 @@ class ExecutionContext(BaseModel):
     task_id: str = Field(min_length=1)
     user_id: str = Field(min_length=1)
     visible_capabilities: frozenset[str] = Field(default_factory=frozenset)
+    approved_input: ApprovedInput | None = None
 
 
 class RuntimeErrorInfo(BaseModel):

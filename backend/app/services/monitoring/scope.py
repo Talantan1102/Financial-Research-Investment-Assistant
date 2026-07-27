@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy import exists, or_
 from sqlalchemy.orm import Session
 
+from app.models.paper_account import PaperAccount, PaperAccountStatus
 from app.models.position import Position
+from app.models.watchlist import WatchlistItem
 
 
 class MonitoringSubject(BaseModel):
@@ -16,16 +21,70 @@ class MonitoringSubject(BaseModel):
     user_id: str
     ts_code: str
     name: str
+    sources: tuple[str, ...] = ()
 
 
 def load_active_subjects(session: Session) -> list[MonitoringSubject]:
-    """Load all (user_id, ts_code) pairs with non-empty positions.
+    """Load monitored (user_id, ts_code) pairs from positions and watchlists.
 
-    Spec § 1 决策 2:scope = positions WHERE quantity > 0(去 monitoring_customers).
+    Manual positions remain eligible while simulated positions must belong to
+    the user's active account generation.
     """
-    rows = (
+    position_rows = (
         session.query(Position.user_id, Position.ts_code, Position.name)
-        .filter(Position.quantity > 0)
+        .filter(
+            Position.quantity > 0,
+            or_(
+                Position.paper_account_id.is_(None),
+                exists().where(
+                    PaperAccount.id == Position.paper_account_id,
+                    PaperAccount.user_id == Position.user_id,
+                    PaperAccount.generation == Position.paper_account_generation,
+                    PaperAccount.status == PaperAccountStatus.ACTIVE,
+                ),
+            ),
+        )
         .all()
     )
-    return [MonitoringSubject(user_id=str(r.user_id), ts_code=r.ts_code, name=r.name) for r in rows]
+    merged: dict[tuple[str, str], dict[str, object]] = {}
+    for row in position_rows:
+        key = (str(row.user_id), row.ts_code)
+        merged[key] = {
+            "user_id": key[0],
+            "ts_code": row.ts_code,
+            "name": row.name,
+            "sources": {"position"},
+        }
+
+    watchlist_rows = (
+        session.query(
+            WatchlistItem.user_id,
+            WatchlistItem.ts_code,
+            WatchlistItem.name,
+        )
+        .filter(WatchlistItem.monitoring_enabled.is_(True))
+        .all()
+    )
+    for row in watchlist_rows:
+        key = (str(row.user_id), row.ts_code)
+        if key in merged:
+            sources = merged[key]["sources"]
+            assert isinstance(sources, set)
+            sources.add("watchlist")
+        else:
+            merged[key] = {
+                "user_id": key[0],
+                "ts_code": row.ts_code,
+                "name": row.name,
+                "sources": {"watchlist"},
+            }
+
+    return [
+        MonitoringSubject(
+            user_id=str(values["user_id"]),
+            ts_code=str(values["ts_code"]),
+            name=str(values["name"]),
+            sources=tuple(sorted(cast(set[str], values["sources"]))),
+        )
+        for values in merged.values()
+    ]

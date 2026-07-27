@@ -14,6 +14,10 @@ from app.models.run_execution import RunToolExecution, RunUsageRecord
 from app.models.run_scheduling import RunOutbox, RunTenantScheduling, RunWorker
 from app.models.tenant import Tenant, TenantMembership
 from app.models.user import User
+from app.scripts.migrate_paper_trading_schema import (
+    migrate_paper_trading_schema,
+    verify_paper_trading_schema_connection,
+)
 from app.scripts.migrate_phase2_scheduling_schema import migrate_phase2_scheduling_schema
 from app.scripts.migrate_phase3_execution_schema import (
     migrate_phase3_execution_schema,
@@ -51,8 +55,10 @@ def initialize_schema(database_engine: Engine = sync_engine) -> None:
         )
         migrate_phase2_scheduling_schema(connection)
         migrate_phase3_execution_schema(connection)
+        migrate_paper_trading_schema(connection)
         Base.metadata.create_all(bind=connection)
         verify_run_control_schema_connection(connection)
+        verify_paper_trading_schema_connection(connection)
 
 
 async def initialize() -> None:

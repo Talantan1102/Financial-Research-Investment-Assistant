@@ -53,7 +53,7 @@ describe('<ChatPane> Run revision integration', () => {
         id: 'session-1', tenant_id: 'tenant-1', created_by_user_id: 'user-1', title: 'Session',
         created_at: now, updated_at: now, archived_at: null, messages: [], has_more: false,
         active_run_id: null, active_run_status: null,
-        active_pause_type: null, active_pause_request: null,
+        active_pause_id: null, active_pause_type: null, active_pause_request: null,
       })),
       http.get(`${API_BASE}/api/v1/tenants/tenant-1/sessions`, () => {
         sessionRefreshes += 1
@@ -101,8 +101,9 @@ describe('<ChatPane> Run revision integration', () => {
         id: 'session-1', tenant_id: 'tenant-1', created_by_user_id: 'user-1', title: 'Session',
         created_at: now, updated_at: now, archived_at: null, messages: [], has_more: false,
         active_run_id: 'run-1', active_run_status: 'waiting_input',
+        active_pause_id: 'pause-input',
         active_pause_type: 'input', active_pause_request: { question: 'Need context' },
-        revisions: [], latest_run_id: 'run-1',
+        revisions: [], latest_run_id: 'run-1', latest_run_status: 'waiting_input',
       })),
       http.get(`${API_BASE}/api/v1/tenants/tenant-1/sessions`, () => HttpResponse.json([])),
     )
@@ -114,7 +115,7 @@ describe('<ChatPane> Run revision integration', () => {
         sessionId="session-1"
         initialRunId="run-1"
         initialRunStatus="waiting_input"
-        initialPause={{ type: 'input_request', request: { question: 'Need context' } }}
+        initialPause={{ id: 'pause-input', type: 'input_request', request: { question: 'Need context' } }}
       />,
     )
     expect(await rendered.findByText('Need context')).toBeInTheDocument()

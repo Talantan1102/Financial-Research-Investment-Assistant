@@ -4,14 +4,23 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
 from uuid import UUID
 
+from pydantic import ValidationError
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.chatloop.approval_edits import (
+    ApprovalEditResponse,
+    DenyEditableApprovalValidator,
+    EditableApprovalValidator,
+    normalize_standard_json_object,
+    validate_edit_ids,
+)
 from app.models.run import Run, RunAttempt, RunEvent, RunMessage, RunPause, RunSession
 from app.models.run_scheduling import RunOutbox
 from app.models.tenant import Tenant, TenantMembership
@@ -58,8 +67,16 @@ class _RetryCancelError(Exception):
 class RunService:
     """Own all transaction boundaries for Run commands and queries."""
 
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+    def __init__(
+        self,
+        session_factory: async_sessionmaker[AsyncSession],
+        *,
+        editable_approval_validator: EditableApprovalValidator | None = None,
+    ) -> None:
         self._session_factory = session_factory
+        self._editable_approval_validator = (
+            editable_approval_validator or DenyEditableApprovalValidator()
+        )
 
     async def create_run(self, command: CreateRunCommand) -> CreatedRun:
         request_hash = _canonical_request_hash(command)
@@ -417,6 +434,7 @@ class RunService:
         run_id: UUID,
         actor_id: UUID,
         *,
+        pause_id: UUID,
         response: dict[str, Any],
     ) -> Run:
         async with self._session_factory() as session, session.begin():
@@ -430,8 +448,13 @@ class RunService:
                 .with_for_update()
             )
             current_status = RunStatus(cast(str, run.status))
+            if latest_pause is None or latest_pause.id != pause_id:
+                raise ResumeNotAllowed("pause identity does not match current pause")
             if latest_pause is not None and latest_pause.resolved_at is not None:
-                if _canonical_json(latest_pause.response_payload) == _canonical_json(response):
+                normalized_response = self._normalize_resume_response(latest_pause, response)
+                if _canonical_json(latest_pause.response_payload) == _canonical_json(
+                    normalized_response
+                ):
                     return run
                 raise ResumeNotAllowed("pause was already resumed with a different response")
             if current_status not in {
@@ -447,18 +470,11 @@ class RunService:
             }[current_status]
             if latest_pause.pause_type != expected_pause_type:
                 raise ResumeNotAllowed("pause type does not match run status")
-            self._validate_resume_response(latest_pause.pause_type, response)
-            if latest_pause.pause_type == PauseType.APPROVAL.value and "decisions" in response:
-                expected_ids = self._expected_approval_ids(latest_pause)
-                self._validate_resume_response(
-                    latest_pause.pause_type,
-                    response,
-                    expected_approval_ids=expected_ids,
-                )
+            normalized_response = self._normalize_resume_response(latest_pause, response)
 
             assert_transition(current_status, RunStatus.QUEUED)
             now = _utcnow()
-            latest_pause.response_payload = response
+            latest_pause.response_payload = normalized_response
             latest_pause.resolved_at = now
             cast(Any, run).status = RunStatus.QUEUED.value
             cast(Any, run).queue_reason = "resume"
@@ -482,6 +498,40 @@ class RunService:
             )
             return run
 
+    def _normalize_resume_response(
+        self,
+        pause: RunPause,
+        response: dict[str, Any],
+    ) -> dict[str, Any]:
+        pause_type = cast(str, pause.pause_type)
+        self._validate_resume_response(pause_type, response)
+        if pause_type != PauseType.APPROVAL.value:
+            return self._normalize_portable_resume_response(response)
+        if "decisions" in response:
+            self._validate_resume_response(
+                pause_type,
+                response,
+                expected_approval_ids=self._expected_approval_ids(pause),
+            )
+            return self._normalize_portable_resume_response(response)
+        try:
+            approval = ApprovalEditResponse.model_validate(response)
+        except ValidationError as exc:
+            raise ResumeNotAllowed("invalid edited arguments") from exc
+        normalized = approval.model_dump(mode="json", exclude_none=True, exclude_defaults=True)
+        if approval.edited_arguments:
+            normalized["edited_arguments"] = self._validate_approval_edits(
+                pause, approval.edited_arguments
+            )
+        return self._normalize_portable_resume_response(normalized)
+
+    @staticmethod
+    def _normalize_portable_resume_response(response: Mapping[str, Any]) -> dict[str, Any]:
+        try:
+            return normalize_standard_json_object(response)
+        except (TypeError, ValueError) as exc:
+            raise ResumeNotAllowed("resume response must be portable JSON") from exc
+
     @staticmethod
     def _validate_resume_response(
         pause_type: str,
@@ -504,7 +554,10 @@ class RunService:
         if optional_text is not None and not isinstance(optional_text, str):
             raise ResumeNotAllowed("approval response text must be a string")
         if "approved" in response:
-            if set(response) - {"approved", "text"} or type(response["approved"]) is not bool:
+            if (
+                set(response) - {"approved", "text", "edited_arguments"}
+                or type(response["approved"]) is not bool
+            ):
                 raise ResumeNotAllowed("approval response must contain a boolean approved")
             return
         decisions = response.get("decisions")
@@ -520,6 +573,50 @@ class RunService:
             raise ResumeNotAllowed("approval response must contain boolean decisions")
         if expected_approval_ids is not None and set(decisions) != expected_approval_ids:
             raise ResumeNotAllowed("approval decisions must exactly cover requested tool call ids")
+
+    def _validate_approval_edits(
+        self,
+        pause: RunPause,
+        edited_arguments: Mapping[str, Mapping[str, Any]],
+    ) -> dict[str, dict[str, Any]]:
+        request = pause.request_payload
+        tool_calls = request.get("tool_calls") if isinstance(request, dict) else None
+        editable = request.get("editable_tool_call_ids") if isinstance(request, dict) else None
+        if not isinstance(tool_calls, list) or not isinstance(editable, list):
+            raise ResumeNotAllowed("invalid edited arguments")
+        by_id: dict[str, str] = {}
+        for call in tool_calls:
+            if (
+                not isinstance(call, dict)
+                or not isinstance(call.get("id"), str)
+                or not isinstance(call.get("name"), str)
+            ):
+                raise ResumeNotAllowed("invalid edited arguments")
+            by_id[cast(str, call["id"])] = cast(str, call["name"])
+        edit_ids = set(edited_arguments)
+        expected_ids = self._expected_approval_ids(pause)
+        try:
+            validate_edit_ids(
+                requested_ids=set(by_id) & set(expected_ids),
+                editable_ids={call_id for call_id in editable if isinstance(call_id, str)},
+                edited_arguments=edited_arguments,
+            )
+        except ValueError as exc:
+            raise ResumeNotAllowed("invalid edited arguments") from exc
+        if not edit_ids:
+            raise ResumeNotAllowed("invalid edited arguments")
+        try:
+            return {
+                call_id: normalize_standard_json_object(
+                    self._editable_approval_validator.validate(
+                        tool_name=by_id[call_id],
+                        arguments=arguments,
+                    )
+                )
+                for call_id, arguments in edited_arguments.items()
+            }
+        except (TypeError, ValueError, ValidationError) as exc:
+            raise ResumeNotAllowed("invalid edited arguments") from exc
 
     @staticmethod
     def _expected_approval_ids(pause: RunPause) -> frozenset[str]:

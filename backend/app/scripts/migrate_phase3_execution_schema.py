@@ -130,7 +130,15 @@ def _type_sql(value: Any, connection: Connection) -> str:
 def _default_sql(value: Any) -> str | None:
     if value is None:
         return None
-    return re.sub(r"[\s()]", "", str(value).lower().replace('"', ""))
+    sql = re.sub(
+        r"::(?:character varying|text|numeric|integer|boolean)(?:\[\])?",
+        "",
+        str(value).lower().replace('"', ""),
+    )
+    sql = re.sub(r"[\s()]", "", sql)
+    if len(sql) >= 2 and sql[0] == sql[-1] == "'":
+        sql = sql[1:-1]
+    return sql
 
 
 def _check_sql(value: Any, connection: Connection) -> str:
@@ -141,13 +149,14 @@ def _check_sql(value: Any, connection: Connection) -> str:
         )
     sql = str(value).lower().replace('"', "")
     sql = re.sub(
-        r"::(?:character varying|text|numeric|integer|boolean)(?:\[\])?",
+        r"::(?:character varying|[a-z_][a-z0-9_]*)(?:\[\])?",
         "",
         sql,
     )
     sql = re.sub(r"=\s*any\s*\(\s*array\[(.*?)\]\s*\)", r" in (\1)", sql)
     sql = re.sub(r"[\s()]", "", sql)
     sql = re.sub(r"=anyarray\[(.*?)\]", r"in\1", sql)
+    sql = re.sub(r"([a-z_][a-z0-9_.]*)<>allarray\[(.*?)\]", r"\1notin\2", sql)
     sql = re.sub(
         r"([a-z_][a-z0-9_]*)between(-?\d+)and(-?\d+)",
         r"\1>=\2and\1<=\3",
@@ -357,8 +366,18 @@ def _upgrade_tool_reservation_columns(connection: Connection, changes: list[str]
     }
     if required <= columns:
         return
-    known_predecessor = set(RunToolExecution.__table__.columns.keys()) - required
-    if columns != known_predecessor:
+    known_predecessor = (
+        set(RunToolExecution.__table__.columns.keys())
+        - required
+        - {
+            "risk_level",
+            "permission_decision",
+        }
+    )
+    if frozenset(columns) not in {
+        frozenset(known_predecessor),
+        frozenset(known_predecessor | {"risk_level", "permission_decision"}),
+    }:
         raise _unsafe("run_tool_executions reservation columns are partially present")
     connection.execute(text("ALTER TABLE run_tool_executions ADD COLUMN semantic_key varchar(64)"))
     connection.execute(
@@ -403,6 +422,29 @@ def _upgrade_tool_reservation_columns(connection: Connection, changes: list[str]
         text("ALTER TABLE run_tool_executions ALTER COLUMN execution_epoch DROP DEFAULT")
     )
     changes.append("add run_tool_executions reservation ownership columns")
+
+
+def _upgrade_tool_runtime_observation_columns(connection: Connection, changes: list[str]) -> None:
+    columns = {column["name"] for column in inspect(connection).get_columns("run_tool_executions")}
+    required = {"risk_level", "permission_decision"}
+    present = required & columns
+    if present == required:
+        return
+    if present:
+        raise _unsafe("run_tool_executions runtime observation columns are partially present")
+    connection.execute(
+        text(
+            "ALTER TABLE run_tool_executions "
+            "ADD COLUMN risk_level varchar(16) DEFAULT 'unknown' NOT NULL"
+        )
+    )
+    connection.execute(
+        text(
+            "ALTER TABLE run_tool_executions "
+            "ADD COLUMN permission_decision varchar(32) DEFAULT 'unknown' NOT NULL"
+        )
+    )
+    changes.append("add run_tool_executions runtime risk observation columns")
 
 
 def _validate_uniques(connection: Connection, table: Table) -> None:
@@ -580,6 +622,7 @@ def migrate_phase3_execution_schema(
                 changes.append(f"create {table.name}")
 
         _upgrade_tool_reservation_columns(connection, changes)
+        _upgrade_tool_runtime_observation_columns(connection, changes)
 
         # CHECKs and indexes are safe to rebuild. Dangerous identity/provenance
         # drift is checked afterwards so any earlier repair rolls back on failure.
@@ -771,8 +814,8 @@ def _semantic_index_drift(connection: Connection, table: Table) -> list[str]:
     return [] if actual == expected else [f"{table.name} indexes differ"]
 
 
-def _run_control_table_drift(connection: Connection, table: Table) -> list[str]:
-    """Return the complete read-only contract drift for one control-plane table."""
+def canonical_table_drift(connection: Connection, table: Table) -> list[str]:
+    """Return canonical column/constraint/index drift for one PostgreSQL table."""
     inspector = inspect(connection)
     reflected_columns = {column["name"]: column for column in inspector.get_columns(table.name)}
     expected_names = set(table.columns.keys())
@@ -819,7 +862,7 @@ def verify_run_control_schema_connection(connection: Connection) -> None:
     drift = [f"missing tables {sorted(missing)}"] if missing else []
     for table in _RUN_CONTROL_TABLES:
         if table.name in existing:
-            drift.extend(_run_control_table_drift(connection, table))
+            drift.extend(canonical_table_drift(connection, table))
     if drift:
         raise _unsafe(
             "maintenance migration required: "

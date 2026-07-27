@@ -5,10 +5,10 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import importlib
 import json
 import os
 import platform
-import resource
 import signal
 import subprocess
 import sys
@@ -25,27 +25,120 @@ from app.skills.script_schemas import (
 )
 from app.skills.skill_workdir import make_skill_workdir
 
+_resource = importlib.import_module("resource") if os.name == "posix" else None
+_WINDOWS_GATE_TOKEN = b"CODEX_SKILL_JOB_READY\n"
+_WINDOWS_GATE_BOOTSTRAP = """
+import runpy
+import sys
+
+if sys.stdin.buffer.readline() != b"CODEX_SKILL_JOB_READY\\n":
+    raise SystemExit(97)
+sys.argv = [sys.argv[1]]
+runpy.run_path(sys.argv[0], run_name="__main__")
+"""
+
+
+class _WindowsJob:
+    def __init__(self, handle: Any, module: Any, memory_limit_bytes: int) -> None:
+        self._handle = handle
+        self._module = module
+        self._memory_limit_bytes = memory_limit_bytes
+        self._closed = False
+
+    def memory_limit_hit(self, stderr: bytes) -> bool:
+        if b"MemoryError" in stderr:
+            return True
+        try:
+            info = self._module.QueryInformationJobObject(
+                self._handle,
+                self._module.JobObjectExtendedLimitInformation,
+            )
+            peak = int(info.get("PeakProcessMemoryUsed", 0))
+        except Exception:  # pragma: no cover - defensive query after process exit
+            return False
+        return peak >= int(self._memory_limit_bytes * 0.9)
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self._handle.Close()
+
+
+def _create_windows_job(
+    proc: subprocess.Popen[bytes],
+    *,
+    memory_mb: int,
+) -> _WindowsJob:
+    """Bind a gated child to a memory-capped kill-on-close Job Object."""
+    win32job = importlib.import_module("win32job")
+    job = win32job.CreateJobObject(None, "")
+    try:
+        info = win32job.QueryInformationJobObject(
+            job,
+            win32job.JobObjectExtendedLimitInformation,
+        )
+        basic = info["BasicLimitInformation"]
+        basic["LimitFlags"] = (
+            int(basic["LimitFlags"])
+            | int(win32job.JOB_OBJECT_LIMIT_PROCESS_MEMORY)
+            | int(win32job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE)
+        )
+        memory_limit_bytes = memory_mb * 1024 * 1024
+        info["ProcessMemoryLimit"] = memory_limit_bytes
+        win32job.SetInformationJobObject(
+            job,
+            win32job.JobObjectExtendedLimitInformation,
+            info,
+        )
+        win32job.AssignProcessToJobObject(job, proc._handle)  # type: ignore[attr-defined]
+    except Exception:
+        job.Close()
+        raise
+    return _WindowsJob(job, win32job, memory_limit_bytes)
+
 
 def _apply_rlimits(*, memory_mb: int, cpu_seconds: int):
     """Build a preexec_fn closure that caps memory + CPU in the child process.
 
-    POSIX-only. macOS RLIMIT_AS is unreliable for malloc — fall back to
-    RLIMIT_DATA there.
+    Return ``None`` where ``preexec_fn`` and the POSIX resource module are not
+    available. macOS RLIMIT_AS is unreliable for malloc, so use RLIMIT_DATA.
     """
+    if _resource is None:
+        return None
 
     def _set() -> None:
         soft_mem = memory_mb * 1024 * 1024
         if platform.system() != "Darwin":
-            resource.setrlimit(resource.RLIMIT_AS, (soft_mem, soft_mem))
+            _resource.setrlimit(_resource.RLIMIT_AS, (soft_mem, soft_mem))
         else:
             with contextlib.suppress(ValueError, OSError):
-                resource.setrlimit(resource.RLIMIT_DATA, (soft_mem, soft_mem))
+                _resource.setrlimit(_resource.RLIMIT_DATA, (soft_mem, soft_mem))
 
         soft_cpu = cpu_seconds
         hard_cpu = max(cpu_seconds + 5, int(cpu_seconds * 1.5))
-        resource.setrlimit(resource.RLIMIT_CPU, (soft_cpu, hard_cpu))
+        _resource.setrlimit(_resource.RLIMIT_CPU, (soft_cpu, hard_cpu))
 
     return _set
+
+
+def _terminate_process_tree(proc: subprocess.Popen[bytes]) -> None:
+    if os.name == "posix":
+        with contextlib.suppress(ProcessLookupError):
+            posix_os: Any = os
+            posix_signal: Any = signal
+            posix_os.killpg(posix_os.getpgid(proc.pid), posix_signal.SIGKILL)
+        return
+    # taskkill is the Windows equivalent of killing the process group/tree.
+    # Fall back to Popen.kill() if it is unavailable or the process survives.
+    with contextlib.suppress(OSError):
+        subprocess.run(
+            ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+            check=False,
+            capture_output=True,
+        )
+    if proc.poll() is None:
+        proc.kill()
 
 
 # Sandbox / I/O contract constants — tunable via env/Settings later.
@@ -280,9 +373,15 @@ class SkillExecutor:
         timeout_s: int,
     ) -> SkillExecutionResult:
         start = time.monotonic()
+        windows_gated = os.name == "nt"
+        command = (
+            [sys.executable, "-c", _WINDOWS_GATE_BOOTSTRAP, str(script_full)]
+            if windows_gated
+            else [sys.executable, str(script_full)]
+        )
         try:
             proc = subprocess.Popen(
-                [sys.executable, str(script_full)],
+                command,
                 cwd=str(cwd),
                 env=_minimal_env(),
                 stdin=subprocess.PIPE,
@@ -304,99 +403,134 @@ class SkillExecutor:
                 ),
             )
 
-        stdin_blob = json.dumps(args.payload).encode("utf-8")
-
-        try:
-            # C60: get_event_loop() deprecated in 3.10+; get_running_loop() is correct
-            # inside an async def (loop is always running here).
-            stdout_b, stderr_b = await asyncio.get_running_loop().run_in_executor(
-                None,
-                lambda: proc.communicate(input=stdin_blob, timeout=timeout_s),
-            )
-        except subprocess.TimeoutExpired:
-            with contextlib.suppress(ProcessLookupError):
-                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        windows_job: _WindowsJob | None = None
+        if windows_gated:
             try:
-                stdout_b, stderr_b = proc.communicate(timeout=2)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                stdout_b, stderr_b = proc.communicate()
-            elapsed = time.monotonic() - start
-            return SkillExecutionResult(
-                ok=False,
-                stdout_json=None,
-                stderr_text=_truncate_stderr(stderr_b, self._stderr_max_bytes),
-                exit_code=-9,
-                elapsed_s=elapsed,
-                skill_name=ref.skill_name,
-                script_path=ref.script_path,
-                error=SkillExecutionError(
-                    kind="timeout",
-                    message=f"exceeded {timeout_s}s",
-                ),
-            )
+                windows_job = _create_windows_job(
+                    proc,
+                    memory_mb=self._max_memory_mb,
+                )
+            except Exception as exc:
+                _terminate_process_tree(proc)
+                with contextlib.suppress(subprocess.TimeoutExpired):
+                    proc.communicate(timeout=2)
+                return _err_result(
+                    ref,
+                    exit_code=-1,
+                    err=SkillExecutionError(
+                        kind="sandbox_setup_failed",
+                        message=f"Windows Job Object setup failed: {exc}",
+                    ),
+                )
 
-        elapsed = time.monotonic() - start
-        stderr_text = _truncate_stderr(stderr_b, self._stderr_max_bytes)
-        stdout_text = stdout_b.decode("utf-8", errors="replace") if stdout_b else ""
-
-        if proc.returncode != 0:
-            return SkillExecutionResult(
-                ok=False,
-                stdout_json=None,
-                stderr_text=stderr_text,
-                exit_code=proc.returncode,
-                elapsed_s=elapsed,
-                skill_name=ref.skill_name,
-                script_path=ref.script_path,
-                error=SkillExecutionError(
-                    kind="non_zero_exit",
-                    message=f"exit code {proc.returncode}",
-                ),
-            )
-
-        # C34: empty stdout on exit-0 → error result to avoid model_validator crash
-        if not stdout_text.strip():
-            return SkillExecutionResult(
-                ok=False,
-                stdout_json=None,
-                stderr_text=stderr_text,
-                exit_code=proc.returncode,
-                elapsed_s=elapsed,
-                skill_name=ref.skill_name,
-                script_path=ref.script_path,
-                error=SkillExecutionError(
-                    kind="stdout_invalid_json",
-                    message="script exited 0 but produced no stdout",
-                ),
-            )
-
+        stdin_blob = json.dumps(args.payload).encode("utf-8")
+        if windows_gated:
+            stdin_blob = _WINDOWS_GATE_TOKEN + stdin_blob
         try:
-            stdout_json = json.loads(stdout_text)
-        except json.JSONDecodeError as exc:
+            try:
+                # C60: get_event_loop() deprecated in 3.10+; get_running_loop() is correct
+                # inside an async def (loop is always running here).
+                stdout_b, stderr_b = await asyncio.get_running_loop().run_in_executor(
+                    None,
+                    lambda: proc.communicate(input=stdin_blob, timeout=timeout_s),
+                )
+            except subprocess.TimeoutExpired:
+                if windows_job is not None:
+                    windows_job.close()
+                _terminate_process_tree(proc)
+                try:
+                    stdout_b, stderr_b = proc.communicate(timeout=2)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    stdout_b, stderr_b = proc.communicate()
+                elapsed = time.monotonic() - start
+                return SkillExecutionResult(
+                    ok=False,
+                    stdout_json=None,
+                    stderr_text=_truncate_stderr(stderr_b, self._stderr_max_bytes),
+                    exit_code=-9,
+                    elapsed_s=elapsed,
+                    skill_name=ref.skill_name,
+                    script_path=ref.script_path,
+                    error=SkillExecutionError(
+                        kind="timeout",
+                        message=f"exceeded {timeout_s}s",
+                    ),
+                )
+
+            elapsed = time.monotonic() - start
+            stderr_text = _truncate_stderr(stderr_b, self._stderr_max_bytes)
+            stdout_text = stdout_b.decode("utf-8", errors="replace") if stdout_b else ""
+
+            if proc.returncode != 0:
+                memory_limited = windows_job is not None and windows_job.memory_limit_hit(stderr_b)
+                error = (
+                    SkillExecutionError(
+                        kind="memory_limit",
+                        message=f"exceeded {self._max_memory_mb}MB process memory limit",
+                    )
+                    if memory_limited
+                    else SkillExecutionError(
+                        kind="non_zero_exit",
+                        message=f"exit code {proc.returncode}",
+                    )
+                )
+                return SkillExecutionResult(
+                    ok=False,
+                    stdout_json=None,
+                    stderr_text=stderr_text,
+                    exit_code=proc.returncode,
+                    elapsed_s=elapsed,
+                    skill_name=ref.skill_name,
+                    script_path=ref.script_path,
+                    error=error,
+                )
+
+            # C34: empty stdout on exit-0 → error result to avoid model_validator crash
+            if not stdout_text.strip():
+                return SkillExecutionResult(
+                    ok=False,
+                    stdout_json=None,
+                    stderr_text=stderr_text,
+                    exit_code=proc.returncode,
+                    elapsed_s=elapsed,
+                    skill_name=ref.skill_name,
+                    script_path=ref.script_path,
+                    error=SkillExecutionError(
+                        kind="stdout_invalid_json",
+                        message="script exited 0 but produced no stdout",
+                    ),
+                )
+
+            try:
+                stdout_json = json.loads(stdout_text)
+            except json.JSONDecodeError as exc:
+                return SkillExecutionResult(
+                    ok=False,
+                    stdout_json=None,
+                    stderr_text=stderr_text,
+                    exit_code=proc.returncode,
+                    elapsed_s=elapsed,
+                    skill_name=ref.skill_name,
+                    script_path=ref.script_path,
+                    error=SkillExecutionError(
+                        kind="stdout_invalid_json",
+                        message=f"could not parse stdout as JSON: {exc}",
+                    ),
+                )
+
             return SkillExecutionResult(
-                ok=False,
-                stdout_json=None,
+                ok=True,
+                stdout_json=stdout_json,
                 stderr_text=stderr_text,
                 exit_code=proc.returncode,
                 elapsed_s=elapsed,
                 skill_name=ref.skill_name,
                 script_path=ref.script_path,
-                error=SkillExecutionError(
-                    kind="stdout_invalid_json",
-                    message=f"could not parse stdout as JSON: {exc}",
-                ),
             )
-
-        return SkillExecutionResult(
-            ok=True,
-            stdout_json=stdout_json,
-            stderr_text=stderr_text,
-            exit_code=proc.returncode,
-            elapsed_s=elapsed,
-            skill_name=ref.skill_name,
-            script_path=ref.script_path,
-        )
+        finally:
+            if windows_job is not None:
+                windows_job.close()
 
 
 def _truncate_stderr(data: bytes, max_bytes: int) -> str:

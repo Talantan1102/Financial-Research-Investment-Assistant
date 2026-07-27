@@ -6,12 +6,21 @@ import { renderWithProviders } from '@/test-utils/render'
 import { useLocation } from 'react-router-dom'
 import { ChatPane } from '@/components/chat/ChatPane'
 import { currentChatActions, currentChatState } from '@/store/current-chat'
+import { previewPaperOrder } from '@/api/paperTrading'
+
+vi.mock('@/api/paperTrading', () => ({
+  previewPaperOrder: vi.fn(),
+}))
 
 const sendPromptMock = vi.fn(async () => ({ ok: true as const }))
 const cancelRunMock = vi.fn(async () => ({ ok: true as const }))
 const resumeRunMock = vi.fn(async () => ({ ok: true as const }))
 const resubmitPromptMock = vi.fn(async () => ({ ok: true as const }))
-let pauseMock: { type: 'approval_request' | 'input_request'; request: Record<string, unknown> } | null = null
+let pauseMock: {
+  id: string
+  type: 'approval_request' | 'input_request'
+  request: Record<string, unknown>
+} | null = null
 let revisionsMock: Array<{
   id: string
   replaces_run_id: string | null
@@ -93,6 +102,7 @@ describe('<ChatPane> integration with useRunSSE', () => {
   it('renders approval and input pause controls and sends typed resume responses', async () => {
     const user = userEvent.setup()
     pauseMock = {
+      id: 'pause-approval',
       type: 'approval_request',
       request: {
         tool_calls: [
@@ -118,6 +128,7 @@ describe('<ChatPane> integration with useRunSSE', () => {
     expect(resumeRunMock).toHaveBeenCalledWith({ approved: false })
 
     pauseMock = {
+      id: 'pause-input',
       type: 'input_request',
       request: {
         question: '<img src=x onerror="globalThis.pwned=true">请输入成本价？',
@@ -130,6 +141,66 @@ describe('<ChatPane> integration with useRunSSE', () => {
     await user.type(screen.getByLabelText('补充信息'), 'more context')
     await user.click(screen.getByRole('button', { name: '提交补充信息' }))
     expect(resumeRunMock).toHaveBeenLastCalledWith({ text: 'more context' })
+  })
+
+  it('renders one editable paper write as a dedicated card and keeps ordinary approvals generic', async () => {
+    const user = userEvent.setup()
+    vi.mocked(previewPaperOrder).mockResolvedValue({
+      draft: {
+        side: 'buy', ts_code: '600519.SH', name: '贵州茅台', quantity: 100,
+        order_type: 'limit', limit_price: '1500.0000',
+      },
+      quote: {
+        ts_code: '600519.SH', name: '贵州茅台', price: '1500.0000',
+        timestamp: '2026-07-23T02:00:00Z', source: 'test', is_suspended: false,
+        bid1: null, ask1: null, upper_limit: null, lower_limit: null,
+      },
+      estimated_gross: '150000.00',
+      estimated_fees: { commission: '45.00', stamp_duty: '0.00', transfer_fee: '1.50', total: '46.50' },
+      estimated_cash_required: '150046.50',
+      available_cash: '1000000.00',
+      sellable_quantity: 0,
+      market_phase: 'continuous',
+      rules_version: 'cn-a-v1',
+    })
+    pauseMock = {
+      id: 'pause-paper',
+      type: 'approval_request',
+      request: {
+        tool_calls: [{
+          id: 'trade-1',
+          name: 'place_paper_order',
+          arguments: {
+            side: 'buy', ts_code: '600519.SH', name: '贵州茅台', quantity: 100,
+            order_type: 'limit', limit_price: '1500.0000',
+          },
+        }],
+        editable_tool_call_ids: ['trade-1'],
+      },
+    }
+    const rendered = renderWithProviders(<ChatPane tenantId="tenant-1" />)
+    expect(screen.getByRole('region', { name: '模拟交易审批' })).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '审批请求' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '预览交易' }))
+    await user.click(await screen.findByRole('button', { name: '确认买入' }))
+    expect(resumeRunMock).toHaveBeenCalledWith({
+      approved: true,
+      edited_arguments: {
+        'trade-1': expect.objectContaining({ quantity: 100, limit_price: '1500.0000' }),
+      },
+    })
+
+    pauseMock = {
+      id: 'pause-generic',
+      type: 'approval_request',
+      request: {
+        tool_calls: [{ id: 'high-1', name: 'send_notice', arguments: { channel: 'email' } }],
+        editable_tool_call_ids: ['high-1'],
+      },
+    }
+    rendered.rerender(<ChatPane tenantId="tenant-1" />)
+    expect(screen.queryByRole('region', { name: '模拟交易审批' })).not.toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '审批请求' })).toBeInTheDocument()
   })
 
   it('allows the first prompt without a pre-created Session', async () => {
@@ -180,7 +251,7 @@ describe('<ChatPane> integration with useRunSSE', () => {
     await user.click(editor.closest('div')!.querySelector('button')!)
     expect(editor).toHaveValue('retry draft')
 
-    pauseMock = { type: 'input_request', request: { question: 'more?' } }
+    pauseMock = { id: 'pause-input', type: 'input_request', request: { question: 'more?' } }
     resumeRunMock.mockResolvedValueOnce({ ok: false })
     rendered.rerender(<ChatPane sessionId="s1" tenantId="tenant-1" />)
     const answer = Array.from(document.querySelectorAll('textarea')).at(-1)!

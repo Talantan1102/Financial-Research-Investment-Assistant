@@ -36,6 +36,7 @@ describe('<ChatSessionPage>', () => {
         id: 'abc', tenant_id: 'tenant-1', created_by_user_id: 'u', title: 'demo',
         created_at: now, updated_at: now, archived_at: null, has_more: false,
         active_run_id: 'run-active', active_run_status: 'waiting_input',
+        active_pause_id: 'pause-input',
         active_pause_type: 'input', active_pause_request: { question: '成本价？' },
         messages: [{ id: 'm1', role: 'assistant', content: 'durable answer', status: 'done', created_at: now }],
       })),
@@ -48,7 +49,7 @@ describe('<ChatSessionPage>', () => {
     await waitFor(() => expect(currentChatState.session_id).toBe('abc'))
     await waitFor(() => expect(runOptions).toEqual(expect.objectContaining({
       initialRunId: 'run-active', initialRunStatus: 'waiting_input',
-      initialPause: { type: 'input_request', request: { question: '成本价？' } },
+      initialPause: { id: 'pause-input', type: 'input_request', request: { question: '成本价？' } },
     })))
   })
 
@@ -65,6 +66,7 @@ describe('<ChatSessionPage>', () => {
           id: 'retry', tenant_id: 'tenant-1', created_by_user_id: 'u', title: 'demo',
           created_at: now, updated_at: now, archived_at: null, has_more: false,
           active_run_id: 'run-recovered', active_run_status: 'waiting_approval',
+          active_pause_id: 'pause-approval',
           active_pause_type: 'approval', active_pause_request: { tools: [{ name: 'quote', arguments: { symbol: '600000' } }] },
           messages: [{ id: 'm2', role: 'assistant', content: 'recovered history', status: 'done', created_at: now }],
         })

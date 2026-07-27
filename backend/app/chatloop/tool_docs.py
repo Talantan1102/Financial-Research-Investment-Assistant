@@ -509,6 +509,61 @@ TOOL_DOCS: dict[str, ToolDoc] = {
         ),
         thin_required={"action": "string"},
     ),
+    "get_paper_account": ToolDoc(
+        "get_paper_account",
+        "deferred",
+        "读取当前用户的默认模拟账户。",
+        "只读当前用户模拟账户余额，不会触发交易。参数为空。",
+        {},
+    ),
+    "list_paper_orders": ToolDoc(
+        "list_paper_orders",
+        "deferred",
+        "读取当前用户的模拟订单列表。",
+        "只读工具。可选 status、ts_code、limit；不用于创建或修改订单。",
+        {},
+    ),
+    "get_paper_order": ToolDoc(
+        "get_paper_order",
+        "deferred",
+        "读取当前用户的一笔模拟订单。",
+        "只读工具。参数 order_id(UUID)，跨用户订单不可见。",
+        {"order_id": "string"},
+    ),
+    "place_paper_order": ToolDoc(
+        "place_paper_order",
+        "deferred",
+        "按用户明确要求提交模拟买入或卖出。",
+        "仅当用户明确给出股票、方向和数量时使用；研究行情不得调用。执行前暂停并让用户确认，可编辑数量和限价。",
+        {
+            "side": "string",
+            "ts_code": "string",
+            "name": "string",
+            "quantity": "integer",
+            "order_type": "string",
+        },
+    ),
+    "cancel_paper_order": ToolDoc(
+        "cancel_paper_order",
+        "deferred",
+        "按用户明确要求撤销模拟订单。",
+        "仅在用户明确要求撤销具体订单时使用，执行前必须确认。",
+        {"order_id": "string"},
+    ),
+    "reset_paper_account": ToolDoc(
+        "reset_paper_account",
+        "deferred",
+        "按用户明确要求重置模拟账户。",
+        "重置会归档当前代账户，执行前必须确认。参数 initial_cash。",
+        {"initial_cash": "number"},
+    ),
+    "manage_watchlist": ToolDoc(
+        "manage_watchlist",
+        "deferred",
+        "直接增改删当前用户自选股。",
+        "自选股变更直接执行且留审计；monitoring_enabled 默认 false。参数 action、ts_code。",
+        {"action": "string", "ts_code": "string"},
+    ),
 }
 
 
@@ -543,6 +598,13 @@ DEFERRED_TOOLS: list[str] = [
     "get_fund_nav",
     "get_sector_daily",
     "trade_cal",
+    "get_paper_account",
+    "list_paper_orders",
+    "get_paper_order",
+    "place_paper_order",
+    "cancel_paper_order",
+    "reset_paper_account",
+    "manage_watchlist",
 ]
 
 

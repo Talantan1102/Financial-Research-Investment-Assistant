@@ -21,4 +21,9 @@ describe('routes', () => {
     const root = routes.find((r) => r.path === '/')
     expect(root).toBeDefined()
   })
+  it('declares paper account and watchlist workspaces', () => {
+    const paths = routes.map((r) => r.path)
+    expect(paths).toContain('/paper-trading')
+    expect(paths).toContain('/watchlist')
+  })
 })

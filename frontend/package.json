@@ -11,8 +11,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test",
-    "postinstall": "chmod +x node_modules/.bin/* 2>/dev/null || true"
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@ant-design/v5-patch-for-react-19": "^1.0.3",

@@ -8,9 +8,13 @@ from __future__ import annotations
 
 import os
 import shutil
+import signal
 import subprocess
+import sys
 import time
 from collections.abc import Generator
+from contextlib import contextmanager
+from typing import Any
 
 import pytest
 
@@ -40,6 +44,75 @@ def prepare_celery_worker_env(base: dict[str, str], redis_url: str) -> dict[str,
     return env
 
 
+def _stop_posix_worker(proc: subprocess.Popen[bytes]) -> None:
+    """Terminate the whole worker process group, escalating after a bounded wait."""
+    try:
+        process_group = os.getpgid(proc.pid)
+        os.killpg(process_group, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process_group, getattr(signal, "SIGKILL", 9))
+        except ProcessLookupError:
+            return
+        proc.wait(timeout=10)
+
+
+def _stop_worker(proc: subprocess.Popen[bytes]) -> None:
+    """Stop the worker and its uv/celery child processes on every platform."""
+    if sys.platform == "win32":
+        subprocess.run(
+            ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+            capture_output=True,
+            check=False,
+        )
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=10)
+        return
+    _stop_posix_worker(proc)
+
+
+def _start_worker(producer_config: Any, *args: Any, **kwargs: Any) -> subprocess.Popen[bytes]:
+    """Restore in-process producer configuration when spawning fails."""
+    try:
+        return subprocess.Popen(*args, **kwargs)
+    except BaseException:
+        producer_config.__exit__(*sys.exc_info())
+        raise
+
+
+@contextmanager
+def configured_celery_producer(redis_url: str) -> Generator[None, None, None]:
+    """Point the in-process producer/result consumer at the worker's broker."""
+    from app.tasks.celery_app import celery_app
+
+    apps = [celery_app]
+    paper_module = sys.modules.get("app.tasks.paper_trading")
+    paper_task = getattr(paper_module, "match_order", None)
+    if paper_task is not None and paper_task.app is not celery_app:
+        apps.append(paper_task.app)
+    originals = [
+        (app, app.conf.broker_url, app.conf.result_backend, app._backend_cache) for app in apps
+    ]
+    for app in apps:
+        app.conf.broker_url = redis_url
+        app.conf.result_backend = redis_url
+        app._backend_cache = None
+    try:
+        yield
+    finally:
+        for app, old_broker, old_backend, old_backend_cache in originals:
+            app.conf.broker_url = old_broker
+            app.conf.result_backend = old_backend
+            app._backend_cache = old_backend_cache
+
+
 @pytest.fixture(scope="session")
 def redis_url() -> Generator[str, None, None]:
     """Session-scoped redis broker URL.
@@ -62,7 +135,15 @@ def redis_url() -> Generator[str, None, None]:
 
 
 @pytest.fixture(scope="session")
-def celery_worker_subprocess(redis_url: str) -> Generator[None, None, None]:
+def paper_trading_worker_fixture_path() -> str | None:
+    return os.environ.get("PAPER_TRADING_WORKER_FIXTURE")
+
+
+@pytest.fixture(scope="module")
+def celery_worker_subprocess(
+    redis_url: str,
+    paper_trading_worker_fixture_path: str | None,
+) -> Generator[None, None, None]:
     """Spawn Celery worker subprocess against redis broker.
 
     Runs --concurrency=1 to keep ordering deterministic in tests.
@@ -73,62 +154,79 @@ def celery_worker_subprocess(redis_url: str) -> Generator[None, None, None]:
     # and run_chat must get past dependency construction before it can mark the
     # DB task running; use mock unless the caller explicitly selected a real
     # integration mode (cassette/live/mock).
-    proc = subprocess.Popen(
-        [
-            "uv",
-            "run",
-            "celery",
-            "-A",
-            "app.tasks.celery_app",
-            "worker",
-            "-Q",
-            ",".join(CELERY_WORKER_QUEUES),
-            "--concurrency",
-            "1",
-            "--loglevel",
-            "INFO",
-        ],
+    if paper_trading_worker_fixture_path is not None:
+        env["PAPER_TRADING_WORKER_FIXTURE"] = paper_trading_worker_fixture_path
+    worker_args = [
+        "uv",
+        "run",
+        "celery",
+        "-A",
+        "app.tasks.celery_app",
+        "worker",
+        "-Q",
+        ",".join(CELERY_WORKER_QUEUES),
+        "--concurrency",
+        "1",
+        "--pool=solo",
+        "--loglevel",
+        "INFO",
+    ]
+    if paper_trading_worker_fixture_path is not None:
+        worker_args.extend(["--include", "tests.worker_paper_trading_fixture"])
+
+    producer_config = configured_celery_producer(redis_url)
+    producer_config.__enter__()
+    proc = _start_worker(
+        producer_config,
+        worker_args,
         cwd="backend",
         env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,  # merge stderr → stdout; celery logs to stderr by default
-        bufsize=1,
+        start_new_session=sys.platform != "win32",
     )
 
     # Wait for "ready" log line (max 60s — graph singleton build is heavy:
     # imports langchain/langgraph + builds CompiledStateGraph at worker import time).
-    # Use select with short timeout so we re-check wall clock between readline calls
-    # (readline alone can block past deadline if pipe is silent).
-    import select
+    # A daemon reader keeps the timeout enforceable on both POSIX and Windows,
+    # where select() does not accept subprocess pipes.
+    import queue
+    import threading
+
+    lines: queue.Queue[bytes] = queue.Queue()
+
+    def _read_worker_output() -> None:
+        assert proc.stdout is not None
+        for line in iter(proc.stdout.readline, b""):
+            lines.put(line)
+
+    threading.Thread(target=_read_worker_output, daemon=True).start()
 
     start = time.time()
     ready = False
     while time.time() - start < 60:
-        if proc.stdout is None:
-            break
-        rlist, _, _ = select.select([proc.stdout], [], [], 0.5)
-        if not rlist:
+        try:
+            raw_line = lines.get(timeout=0.5)
+        except queue.Empty:
+            if proc.poll() is not None:
+                break
             continue
-        line = proc.stdout.readline().decode("utf-8", errors="ignore")
-        if not line:
-            # EOF — worker died
-            break
+        line = raw_line.decode("utf-8", errors="ignore")
         if "celery@" in line and "ready" in line:
             ready = True
             break
 
     if not ready:
-        proc.terminate()
         try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+            _stop_worker(proc)
+        finally:
+            producer_config.__exit__(None, None, None)
         pytest.skip("celery worker did not become ready in 60s")
 
-    yield
-
-    proc.terminate()
     try:
-        proc.wait(timeout=10)
-    except subprocess.TimeoutExpired:
-        proc.kill()
+        yield
+    finally:
+        try:
+            _stop_worker(proc)
+        finally:
+            producer_config.__exit__(None, None, None)

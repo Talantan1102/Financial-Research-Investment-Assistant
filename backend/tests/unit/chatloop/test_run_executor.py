@@ -16,6 +16,7 @@ import pytest
 from app.chatloop.continuation import ContinuationV1, PendingActionV1
 from app.chatloop.contracts import ToolResult
 from app.chatloop.gates import GateConfig
+from app.chatloop.inprocess import InProcessTool
 from app.chatloop.run_executor import (
     ChatRunExecutor,
     CompletedResult,
@@ -25,7 +26,10 @@ from app.chatloop.run_executor import (
     PauseResult,
 )
 from app.chatloop.state import ChatLoopState
+from app.chatloop.tool_hub import ToolHub
+from app.runtime.models import ExecutionContext
 from app.services.llm_step import StepDelta, StepResult, StepToolCall
+from pydantic import BaseModel
 
 TEST_CONTINUATION_SECRET = b"s" * 32
 
@@ -115,6 +119,7 @@ class _RecordingHub:
     def __init__(self) -> None:
         self.calls: list[StepToolCall] = []
         self.user_ids: list[str] = []
+        self.approved_inputs: list[dict[str, Any]] = []
 
     def schemas_for_llm(self) -> list[dict[str, Any]]:
         return []
@@ -122,6 +127,7 @@ class _RecordingHub:
     async def dispatch(self, calls: list[StepToolCall], state: Any) -> list[ToolResult]:
         self.calls.extend(calls)
         self.user_ids.append(state.user_id)
+        self.approved_inputs.append(dict(state.approved_inputs))
         results = []
         for call in calls:
             args = call.parsed_args
@@ -230,6 +236,193 @@ def test_public_approval_snapshot_round_trips_through_standard_continuation() ->
     assert decision == "approve"
     assert pending == (call,)
     assert state.messages[-1]["tool_calls"][0]["id"] == "call-1"
+
+
+async def test_approved_edits_execute_effective_call_and_keep_original_audit() -> None:
+    command = _command(prompt="place it")
+    call = StepToolCall(id="trade-1", name="place_order", arguments='{"quantity":100}')
+    user_id = str(uuid4())
+    continuation = ChatRunExecutor.approval_snapshot(
+        command,
+        user_id=user_id,
+        pending_tool_calls=(call,),
+        editable_tool_call_ids=frozenset({"trade-1"}),
+        continuation_secret=TEST_CONTINUATION_SECRET,
+        continuation_key_id="default",
+    )
+    hub = _RecordingHub()
+    llm = _ScriptedLLM([_step("done")])
+
+    result = await ChatRunExecutor(
+        user_id=user_id,
+        continuation_secret=TEST_CONTINUATION_SECRET,
+        components=SimpleNamespace(**{**vars(_components(llm)), "tool_hub": hub}),
+        event_sink=lambda _event: asyncio.sleep(0),
+        cancel_event=asyncio.Event(),
+    ).execute(
+        ExecuteChatRun(
+            command.run_id,
+            uuid4(),
+            command.session_id,
+            json.dumps(
+                {
+                    "approved": True,
+                    "edited_arguments": {"trade-1": {"quantity": 200}},
+                }
+            ),
+            (),
+            continuation,
+            command.tenant_id,
+        )
+    )
+
+    assert isinstance(result, CompletedResult)
+    assert hub.calls[0].parsed_args == {"quantity": 200}
+    assert hub.approved_inputs[0]["trade-1"].original == {"quantity": 100}
+    assert hub.approved_inputs[0]["trade-1"].effective == {"quantity": 200}
+    assert (
+        continuation["body"]["pending_action"]["pending_tool_calls"][0]["arguments"]
+        == '{"quantity":100}'
+    )
+    assert result.tools[0].request == {"quantity": 200}
+
+
+class _RawApprovalArgs(BaseModel):
+    quantity: int
+    meta: dict[str, Any]
+
+
+class _RawApprovalTool(InProcessTool):
+    name = "memory_write"
+    description = "approval context probe"
+    args_schema = _RawApprovalArgs
+
+    def __init__(self) -> None:
+        self.approved_input = None
+        self.nested_mutation_failed = False
+
+    async def run_with_state(self, args: BaseModel, state: ChatLoopState) -> dict[str, Any]:
+        del args, state
+        raise AssertionError("context-aware path expected")
+
+    async def run_with_context(
+        self,
+        args: BaseModel,
+        state: ChatLoopState,
+        context: ExecutionContext,
+    ) -> dict[str, Any]:
+        del args, state
+        self.approved_input = context.approved_input
+        assert context.approved_input is not None
+        try:
+            context.approved_input.effective["meta"]["legs"][0]["quantity"] = 999
+        except TypeError:
+            self.nested_mutation_failed = True
+        return {"ok": True}
+
+
+async def test_raw_approval_reaches_inprocess_as_attempt_local_trusted_input() -> None:
+    command = _command(prompt="write it")
+    call = StepToolCall(
+        id="write-1",
+        name="memory_write",
+        arguments='{"quantity":100,"meta":{"legs":[{"quantity":100}]}}',
+    )
+    user_id = str(uuid4())
+    continuation = ChatRunExecutor.approval_snapshot(
+        command,
+        user_id=user_id,
+        pending_tool_calls=(call,),
+        editable_tool_call_ids=frozenset({"write-1"}),
+        continuation_secret=TEST_CONTINUATION_SECRET,
+        continuation_key_id="default",
+    )
+    tool = _RawApprovalTool()
+    hub = ToolHub(progressive=False)
+    hub.register_inprocess([tool])
+
+    result = await ChatRunExecutor(
+        user_id=user_id,
+        continuation_secret=TEST_CONTINUATION_SECRET,
+        components=SimpleNamespace(
+            llm=_ScriptedLLM([_step("done")]),
+            tool_hub=hub,
+            gate_cfg=GateConfig(),
+            skill_listing="",
+            system_prompt="financial assistant",
+        ),
+        event_sink=lambda _event: asyncio.sleep(0),
+        cancel_event=asyncio.Event(),
+    ).execute(
+        ExecuteChatRun(
+            command.run_id,
+            uuid4(),
+            command.session_id,
+            '{"approved":true}',
+            (),
+            continuation,
+            command.tenant_id,
+        )
+    )
+
+    assert isinstance(result, CompletedResult)
+    assert tool.approved_input is not None
+    assert tool.nested_mutation_failed is True
+    assert tool.approved_input.original == {
+        "quantity": 100,
+        "meta": {"legs": ({"quantity": 100},)},
+    }
+    assert tool.approved_input.effective == tool.approved_input.original
+    assert tool.approved_input.effective["meta"]["legs"][0]["quantity"] == 100
+    assert "approved_inputs" not in continuation["body"]
+
+
+@pytest.mark.parametrize(
+    ("response", "expected_ids"),
+    [
+        ({"approved": True}, {"write-1"}),
+        ({"approved": False}, set()),
+        ({"decisions": {"write-1": True, "read-1": True}}, {"write-1"}),
+    ],
+)
+def test_approval_context_marks_only_approved_requested_editable_calls(
+    response: dict[str, Any],
+    expected_ids: set[str],
+) -> None:
+    command = _command(prompt="mixed")
+    calls = (
+        StepToolCall(id="write-1", name="memory_write", arguments='{"quantity":100}'),
+        StepToolCall(id="read-1", name="get_stock_quote", arguments="{}"),
+    )
+    user_id = str(uuid4())
+    continuation = ChatRunExecutor.approval_snapshot(
+        command,
+        user_id=user_id,
+        pending_tool_calls=calls,
+        editable_tool_call_ids=frozenset({"write-1"}),
+        continuation_secret=TEST_CONTINUATION_SECRET,
+        continuation_key_id="default",
+    )
+    resumed = ExecuteChatRun(
+        command.run_id,
+        uuid4(),
+        command.session_id,
+        json.dumps(response),
+        (),
+        continuation,
+        command.tenant_id,
+    )
+    executor = ChatRunExecutor(
+        user_id=user_id,
+        continuation_secret=TEST_CONTINUATION_SECRET,
+        components=_components(_ScriptedLLM([_step("done")])),
+        event_sink=lambda _event: asyncio.sleep(0),
+        cancel_event=asyncio.Event(),
+    )
+
+    state, _calls, _prompt, _decision = executor._initial_state(resumed, continuation)
+
+    assert set(state.approved_inputs) == expected_ids
 
 
 async def test_completed_contract_usage_event_order_and_immutable_inputs() -> None:
@@ -1508,26 +1701,8 @@ async def test_tool_call_id_reuse_from_continuation_history_fails_before_dispatc
 
 
 async def test_empty_tool_call_id_is_tool_error_without_dispatch() -> None:
-    first = StepResult(
-        content="",
-        tool_calls=[StepToolCall(id="", name="same_tool", arguments="{}")],
-        finish_reason="tool_calls",
-        prompt_tokens=1,
-        completion_tokens=1,
-        cached_tokens=0,
-        cost_cny=0,
-    )
-    hub = _RecordingHub()
-    result = await ChatRunExecutor(
-        user_id=uuid4(),
-        continuation_secret=TEST_CONTINUATION_SECRET,
-        components=SimpleNamespace(**{**vars(_components(_ScriptedLLM([first]))), "tool_hub": hub}),
-        event_sink=lambda _event: asyncio.sleep(0),
-        cancel_event=asyncio.Event(),
-    ).execute(_command())
-    assert isinstance(result, FailedResult)
-    assert result.error_code == "tool_error"
-    assert hub.calls == []
+    with pytest.raises(ValueError, match="at least 1 character"):
+        StepToolCall(id="", name="same_tool", arguments="{}")
 
 
 async def test_continuation_envelope_is_signed_and_context_bound() -> None:
