@@ -82,7 +82,7 @@ class DatabaseEntitlementReader:
         entitlement = self._session.scalar(statement)
         if entitlement is None:
             return False
-        return entitlement.can_buy if side is OrderSide.BUY else entitlement.can_sell
+        return bool(entitlement.can_buy if side is OrderSide.BUY else entitlement.can_sell)
 
 
 class PaperOrderService:

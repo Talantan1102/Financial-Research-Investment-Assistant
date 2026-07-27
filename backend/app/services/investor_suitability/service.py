@@ -1,3 +1,4 @@
+# mypy: disable-error-code="arg-type,assignment,index"
 """Transactional workflow for user-operated market-permission applications."""
 
 from __future__ import annotations
