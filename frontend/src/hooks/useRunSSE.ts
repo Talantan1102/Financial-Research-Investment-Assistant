@@ -9,6 +9,7 @@ import {
   type RunResponse,
   type RunRevision,
   type RunStatus,
+  type ActionRequiredOutcome,
 } from '@/api/runApi'
 import type { RunResumeResponse } from '@/types/paper-trading'
 import { chatSessionsActions } from '@/store/chat-sessions'
@@ -36,6 +37,7 @@ interface UseRunSSEOptions {
   initialLatestRunId?: string | null
   initialRevisionCursor?: string | null
   initialRevisionsHasMore?: boolean
+  initialOutcome?: ActionRequiredOutcome | null
 }
 
 export interface UseRunSSE {
@@ -51,6 +53,7 @@ export interface UseRunSSE {
   latestRunId: string | null
   revisionsHasMore: boolean
   commandPending: boolean
+  outcome: ActionRequiredOutcome | null
 }
 
 export interface RunCommandResult {
@@ -73,6 +76,17 @@ interface ParsedSseEvent {
 interface CalibrationResult {
   status: RunStatus
   runId: string | null
+}
+
+function asActionRequiredOutcome(value: unknown): ActionRequiredOutcome | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const candidate = value as Record<string, unknown>
+  const fields = ['action_type', 'action_url', 'action_label', 'resume_hint', 'intent_summary'] as const
+  if (candidate.code !== 'action_required' || !fields.every((field) => typeof candidate[field] === 'string')) {
+    return null
+  }
+  if (!candidate.action_url.startsWith('/') || candidate.action_url.startsWith('//')) return null
+  return candidate as ActionRequiredOutcome
 }
 
 function parseFrame(frame: string): ParsedSseEvent | null {
@@ -159,6 +173,7 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
   const [status, setStatus] = useState<RunStatus | 'idle' | 'error'>('idle')
   const [activeRunId, setActiveRunId] = useState<string | null>(null)
   const [pause, setPause] = useState<RunPause | null>(options.initialPause ?? null)
+  const [outcome, setOutcome] = useState<ActionRequiredOutcome | null>(options.initialOutcome ?? null)
   const [revisions, setRevisions] = useState<RunRevision[]>(options.initialRevisions ?? [])
   const [latestRunId, setLatestRunId] = useState<string | null>(options.initialLatestRunId ?? null)
   const [revisionCursor, setRevisionCursor] = useState<string | null>(options.initialRevisionCursor ?? null)
@@ -193,6 +208,8 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
       setLatestRunId(session.latest_run_id)
       setRevisionCursor(session.revisions_next_cursor ?? null)
       setRevisionsHasMore(session.revisions_has_more ?? false)
+      const latestOutcome = asActionRequiredOutcome(session.latest_run_outcome)
+      if (latestOutcome) setOutcome(latestOutcome)
       void chatSessionsActions.loadSessions()
     },
     [fetchImpl, isCurrent],
@@ -214,6 +231,8 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
         setLatestRunId(session.latest_run_id)
         setRevisionCursor(session.revisions_next_cursor ?? null)
         setRevisionsHasMore(session.revisions_has_more ?? false)
+        const latestOutcome = asActionRequiredOutcome(session.latest_run_outcome)
+        if (latestOutcome) setOutcome(latestOutcome)
 
         const activeStatus = session.active_run_status
         const snapshotStatus = activeStatus ?? session.latest_run_status
@@ -265,6 +284,8 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
         setPause(null)
       }
       updateStatus(run.status)
+      const runOutcome = asActionRequiredOutcome(run.outcome)
+      if (runOutcome) setOutcome(runOutcome)
       if (TERMINAL.has(run.status)) {
         try {
           await loadDurableHistory(tenantId, sessionId, generation, signal)
@@ -320,6 +341,7 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
               }
             } else if (event.event === 'run.completed') {
               const content = event.data.content
+              setOutcome(asActionRequiredOutcome(event.data.outcome))
               updateStatus('completed')
               updateActiveRun(null, 'completed')
               setPause(null)
@@ -443,6 +465,7 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
       seenIdsRef.current = new Set()
       currentChatActions.beginRun(prompt)
       setPause(null)
+      setOutcome(null)
       updateStatus('queued')
       try {
         const replacement = replacesRunId ?? revisionBaseRef.current
@@ -715,6 +738,7 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
     sessionRef.current = options.sessionId
     setActiveRunId(null)
     setPause(null)
+    setOutcome(options.initialOutcome ?? null)
     setRevisions(options.initialRevisions ?? [])
     setLatestRunId(options.initialLatestRunId ?? null)
     setRevisionCursor(options.initialRevisionCursor ?? null)
@@ -728,6 +752,7 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
     options.initialRevisionCursor,
     options.initialRevisions,
     options.initialRevisionsHasMore,
+    options.initialOutcome,
     options.sessionId,
     options.tenantId,
   ])
@@ -800,5 +825,6 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
     revisionsHasMore,
     loadMoreRevisions,
     commandPending,
+    outcome,
   }
 }

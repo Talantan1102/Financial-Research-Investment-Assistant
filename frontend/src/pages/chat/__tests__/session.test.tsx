@@ -53,6 +53,35 @@ describe('<ChatSessionPage>', () => {
     })))
   })
 
+  it('passes the latest action-required outcome to the chat after a browser reload', async () => {
+    const latestOutcome = {
+      code: 'action_required', action_type: 'apply_market_permission',
+      action_url: '/market-permissions/star/apply', action_label: '申请科创板权限',
+      resume_hint: '完成后返回', intent_summary: '买入中芯国际 100 股',
+    }
+    server.use(
+      http.get(`${API_BASE}/api/v1/tenants`, () => HttpResponse.json([
+        { id: 'tenant-1', name: 'Personal', is_personal: true, role: 'owner' },
+      ])),
+      http.get(`${API_BASE}/api/v1/tenants/tenant-1/sessions/outcome`, () => HttpResponse.json({
+        id: 'outcome', tenant_id: 'tenant-1', created_by_user_id: 'u', title: 'demo',
+        created_at: now, updated_at: now, archived_at: null, has_more: false,
+        active_run_id: null, active_run_status: null, active_pause_id: null,
+        active_pause_type: null, active_pause_request: null,
+        latest_run_id: 'run-completed', latest_run_status: 'completed',
+        latest_run_outcome: latestOutcome, messages: [], revisions: [],
+      })),
+    )
+    renderWithProviders(
+      <Routes><Route path="/chat/:session_id" element={<ChatSessionPage />} /></Routes>,
+      { initialRoute: '/chat/outcome' },
+    )
+
+    await waitFor(() => expect(runOptions).toEqual(expect.objectContaining({
+      initialOutcome: latestOutcome,
+    })))
+  })
+
   it('shows a safe detail error and retries history, active Run and pause recovery', async () => {
     let detailAttempts = 0
     server.use(

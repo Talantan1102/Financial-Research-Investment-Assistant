@@ -6,6 +6,7 @@ import { chatSessionsActions } from '@/store/chat-sessions'
 import type { RunStatus } from '@/api/runApi'
 import type { RunRevision } from '@/api/runApi'
 import type { RunPause } from '@/hooks/useRunSSE'
+import type { ActionRequiredOutcome } from '@/api/runApi'
 
 interface SessionDetailState {
   identity: string | null
@@ -17,6 +18,7 @@ interface SessionDetailState {
   latestRunId: string | null
   revisionCursor: string | null
   revisionsHasMore: boolean
+  latestRunOutcome: ActionRequiredOutcome | null
 }
 
 const EMPTY_DETAIL: SessionDetailState = {
@@ -29,6 +31,7 @@ const EMPTY_DETAIL: SessionDetailState = {
   latestRunId: null,
   revisionCursor: null,
   revisionsHasMore: false,
+  latestRunOutcome: null,
 }
 
 function SessionLoadingPane() {
@@ -78,6 +81,7 @@ export function ChatSessionPage() {
           latestRunId: detail.latest_run_id,
           revisionCursor: detail.revisions_next_cursor ?? null,
           revisionsHasMore: detail.revisions_has_more ?? false,
+          latestRunOutcome: detail.latest_run_outcome,
         })
       })
       .catch(() => {
@@ -108,6 +112,7 @@ export function ChatSessionPage() {
         initialLatestRunId={currentDetail.latestRunId}
         initialRevisionCursor={currentDetail.revisionCursor}
         initialRevisionsHasMore={currentDetail.revisionsHasMore}
+        initialOutcome={currentDetail.latestRunOutcome}
       />
     ) : currentDetail?.error ? null : <SessionLoadingPane />}
   </>
