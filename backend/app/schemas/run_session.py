@@ -7,6 +7,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.chatloop.outcomes import ActionRequiredOutcome
+
 
 class RunSessionUpdateRequest(BaseModel):
     title: str = Field(min_length=1, max_length=255, strict=True)
@@ -65,3 +67,4 @@ class RunSessionDetailResponse(RunSessionResponse):
     revisions_next_cursor: str | None
     latest_run_id: UUID | None
     latest_run_status: str | None
+    latest_run_outcome: ActionRequiredOutcome | None = None

@@ -34,6 +34,7 @@ from app.schemas.run import (
     RunResumeRequest,
     RunTraceResponse,
     TraceItem,
+    parse_action_required_outcome,
 )
 from app.services.run_service import CreateRunCommand, RunService
 from app.services.run_stream_bus import RunStreamBus, RunStreamEntry
@@ -111,7 +112,7 @@ async def create_run(
     except RunControlError as exc:
         _raise_http_error(exc)
     response.status_code = status.HTTP_200_OK if created.replayed else status.HTTP_201_CREATED
-    return RunResponse.model_validate(created.run)
+    return _run_response(created.run)
 
 
 @router.get("/{run_id}", response_model=RunResponse)
@@ -125,7 +126,19 @@ async def get_run(
         run = await service.get_run(tenant_id, run_id, cast(UUID, current_user.id))
     except RunControlError as exc:
         _raise_http_error(exc)
-    return RunResponse.model_validate(run)
+    return _run_response(run)
+
+
+def _run_response(run: object) -> RunResponse:
+    response = RunResponse.model_validate(run)
+    return response.model_copy(
+        update={
+            "outcome": parse_action_required_outcome(
+                getattr(run, "outcome_payload", None),
+                outcome_code=getattr(run, "outcome_code", None),
+            )
+        }
+    )
 
 
 def _format_sse(
@@ -137,13 +150,26 @@ def _format_sse(
     payload = dict(event.payload)
     if event.event_type == "run.completed" and final_content is not None:
         payload["content"] = final_content
+    _sanitize_completed_outcome(payload, event.event_type)
     data = json.dumps(payload, ensure_ascii=False, default=str)
     return f"id: {event_id}\nevent: {event.event_type}\ndata: {data}\n\n"
 
 
 def _format_stream_sse(entry: RunStreamEntry, event_id: str) -> str:
-    data = json.dumps(entry.envelope.payload, ensure_ascii=False, default=str)
+    payload = dict(entry.envelope.payload)
+    _sanitize_completed_outcome(payload, entry.envelope.kind)
+    data = json.dumps(payload, ensure_ascii=False, default=str)
     return f"id: {event_id}\nevent: {entry.envelope.kind}\ndata: {data}\n\n"
+
+
+def _sanitize_completed_outcome(payload: dict[str, object], event_type: str) -> None:
+    if event_type != "run.completed" or "outcome" not in payload:
+        return
+    outcome = parse_action_required_outcome(payload["outcome"])
+    if outcome is None:
+        payload.pop("outcome")
+    else:
+        payload["outcome"] = outcome.model_dump(mode="json")
 
 
 async def _read_durable_snapshot(
@@ -417,7 +443,7 @@ async def cancel_run(
         run = await service.cancel_run(tenant_id, run_id, cast(UUID, current_user.id))
     except RunControlError as exc:
         _raise_http_error(exc)
-    return RunResponse.model_validate(run)
+    return _run_response(run)
 
 
 @router.post("/{run_id}/resume", response_model=RunResponse)
@@ -438,4 +464,4 @@ async def resume_run(
         )
     except RunControlError as exc:
         _raise_http_error(exc)
-    return RunResponse.model_validate(run)
+    return _run_response(run)
