@@ -18,13 +18,19 @@ const TENANT_ID = 'tenant-paper'
 const SESSION_ID = 'session-paper'
 const RUN_ID = 'run-paper'
 const ORDER_ID = '11111111-1111-4111-8111-111111111111'
-const EDITED_DRAFT = {
+const RAW_EDITED_DRAFT = {
   side: 'buy',
-  ts_code: '000001.SZ',
-  name: '平安银行',
+  ts_code: ' 000001.SZ ',
+  name: ' 平安银行 ',
   quantity: 100,
   order_type: 'limit',
-  limit_price: '1500.00',
+  limit_price: '1500.0',
+}
+const CANONICAL_EDITED_DRAFT = {
+  ...RAW_EDITED_DRAFT,
+  ts_code: '000001.SZ',
+  name: '平安银行',
+  limit_price: '1500.0000',
 }
 
 async function seedAuthenticatedUser(context: BrowserContext) {
@@ -52,6 +58,7 @@ async function installPaperBackend(page: Page) {
   let runPhase: 'new' | 'waiting' | 'completed' = 'new'
   let orderCreated = false
   let approvedArguments: Record<string, unknown> | null = null
+  let previewRequestArguments: Record<string, unknown> | null = null
   let previewedArguments: Record<string, unknown> | null = null
   const requestedPrompts: string[] = []
   const unexpectedRequests: string[] = []
@@ -289,14 +296,12 @@ async function installPaperBackend(page: Page) {
       const body = request.postDataJSON() as {
         draft: Record<string, unknown>
       }
-      if (!isDeepStrictEqual(body, { draft: EDITED_DRAFT })) {
+      if (!isDeepStrictEqual(body, { draft: RAW_EDITED_DRAFT })) {
         unexpectedRequests.push(`invalid preview: ${JSON.stringify(body)}`)
         return json(route, { detail: 'preview draft mismatch' }, 422)
       }
-      previewedArguments = JSON.parse(JSON.stringify(body.draft)) as Record<
-        string,
-        unknown
-      >
+      previewRequestArguments = structuredClone(body.draft)
+      previewedArguments = structuredClone(CANONICAL_EDITED_DRAFT)
       return json(route, {
         draft: previewedArguments,
         quote: {
@@ -372,6 +377,7 @@ async function installPaperBackend(page: Page) {
   return {
     requestedPrompts,
     approvedArguments: () => approvedArguments,
+    previewRequestArguments: () => previewRequestArguments,
     previewedArguments: () => previewedArguments,
     unexpectedRequests,
   }
@@ -395,25 +401,22 @@ test('buy instruction pauses for editable preview, resumes, and appears in the s
   await expect(approval.getByText('模拟买入审批')).toBeVisible()
   expect(backend.requestedPrompts).toEqual(['给我买入100股贵州茅台'])
 
-  await approval.getByLabel('股票代码').fill('000001.SZ')
-  await approval.getByLabel('股票名称').fill('平安银行')
-  await approval.getByLabel('限价').fill('1500.00')
+  await approval.getByLabel('股票代码').fill(' 000001.SZ ')
+  await approval.getByLabel('股票名称').fill(' 平安银行 ')
+  await approval.getByLabel('限价').fill('1500.0')
   await approval.getByRole('button', { name: /预览/ }).click()
   await expect(approval.getByText('预览有效')).toBeVisible()
   await expect(approval.getByText('¥150,046.50')).toBeVisible()
+  await expect(
+    approval.getByText(JSON.stringify(CANONICAL_EDITED_DRAFT)),
+  ).toBeVisible()
   await approval.getByRole('button', { name: '确认买入' }).click()
 
   await expect(approval).toBeHidden()
   await expect(page.getByText('模拟买入已提交。')).toBeVisible()
-  expect(backend.approvedArguments()).toMatchObject({
-    side: 'buy',
-    ts_code: '000001.SZ',
-    name: '平安银行',
-    quantity: 100,
-    order_type: 'limit',
-    limit_price: '1500.00',
-  })
-  expect(backend.previewedArguments()).toEqual(EDITED_DRAFT)
+  expect(backend.previewRequestArguments()).toEqual(RAW_EDITED_DRAFT)
+  expect(backend.previewedArguments()).toEqual(CANONICAL_EDITED_DRAFT)
+  expect(backend.approvedArguments()).toEqual(CANONICAL_EDITED_DRAFT)
 
   await page.goto('/paper-trading')
   await expect(page.getByRole('heading', { name: '模拟账户' })).toBeVisible()

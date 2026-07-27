@@ -187,6 +187,7 @@ describe('<PaperApprovalCard>', () => {
 
   it('accepts only the latest preview after rapid stock identity edits', async () => {
     const user = userEvent.setup()
+    const onResume = vi.fn(async () => ({ ok: true as const }))
     let resolveFirst!: (value: typeof preview) => void
     vi.mocked(previewPaperOrder)
       .mockImplementationOnce(
@@ -205,7 +206,7 @@ describe('<PaperApprovalCard>', () => {
         },
       })
     renderWithProviders(
-      <PaperApprovalCard request={request} onResume={vi.fn()} />,
+      <PaperApprovalCard request={request} onResume={onResume} />,
     )
 
     await user.click(screen.getByRole('button', { name: '预览交易' }))
@@ -230,8 +231,27 @@ describe('<PaperApprovalCard>', () => {
       { signal: expect.any(AbortSignal) },
     )
     expect(await screen.findByText('¥449,639.36')).toBeInTheDocument()
-    act(() => resolveFirst(preview))
+    await act(async () => {
+      resolveFirst(preview)
+      await Promise.resolve()
+    })
+
+    expect(screen.getByText('¥449,639.36')).toBeInTheDocument()
     expect(screen.queryByText('¥299,792.91')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '确认买入' }))
+    expect(onResume).toHaveBeenCalledWith({
+      approved: true,
+      edited_arguments: {
+        'trade-1': {
+          side: 'buy',
+          ts_code: '000001.SZ',
+          name: '平安银行',
+          quantity: 200,
+          order_type: 'limit',
+          limit_price: '1498.5000',
+        },
+      },
+    })
   })
 
   it('shows stock identity validation inline and keeps preview and approval closed', async () => {
