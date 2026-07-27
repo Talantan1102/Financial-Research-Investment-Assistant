@@ -1,4 +1,10 @@
-import { expect, test, type BrowserContext, type Page, type Route } from '@playwright/test'
+import {
+  expect,
+  test,
+  type BrowserContext,
+  type Page,
+  type Route,
+} from '@playwright/test'
 import { isDeepStrictEqual } from 'node:util'
 
 const USER = {
@@ -14,18 +20,24 @@ const RUN_ID = 'run-paper'
 const ORDER_ID = '11111111-1111-4111-8111-111111111111'
 const EDITED_DRAFT = {
   side: 'buy',
-  ts_code: '600519.SH',
-  name: '贵州茅台',
+  ts_code: '000001.SZ',
+  name: '平安银行',
   quantity: 100,
   order_type: 'limit',
   limit_price: '1500.00',
 }
 
 async function seedAuthenticatedUser(context: BrowserContext) {
-  await context.addInitScript(([key, value]: [string, string]) => {
-    window.localStorage.setItem(key, value)
-    window.localStorage.setItem('memory_onboarding_seen_v1', '1')
-  }, ['auth', JSON.stringify({ token: 'paper-token', user: USER, isLoggedIn: true })])
+  await context.addInitScript(
+    ([key, value]: [string, string]) => {
+      window.localStorage.setItem(key, value)
+      window.localStorage.setItem('memory_onboarding_seen_v1', '1')
+    },
+    [
+      'auth',
+      JSON.stringify({ token: 'paper-token', user: USER, isLoggedIn: true }),
+    ],
+  )
 }
 
 function json(route: Route, body: unknown, status = 200) {
@@ -164,14 +176,18 @@ async function installPaperBackend(page: Page) {
       const editedArguments = body.response.edited_arguments?.['call-buy']
       if (
         body.pause_id !== 'pause-buy' ||
-        body.response.approved &&
-        (previewedArguments === null ||
-          !isDeepStrictEqual(editedArguments, previewedArguments))
+        (body.response.approved &&
+          (previewedArguments === null ||
+            !isDeepStrictEqual(editedArguments, previewedArguments)))
       ) {
         unexpectedRequests.push(
           `invalid approved resume: ${JSON.stringify(body)}`,
         )
-        return json(route, { detail: 'approved arguments were not previewed' }, 409)
+        return json(
+          route,
+          { detail: 'approved arguments were not previewed' },
+          409,
+        )
       }
       approvedArguments = editedArguments ?? null
       orderCreated = body.response.approved
@@ -207,8 +223,7 @@ async function installPaperBackend(page: Page) {
         retry_count: 0,
         created_at: '2026-07-24T01:01:00Z',
         queued_at: '2026-07-24T01:01:00Z',
-        finished_at:
-          runPhase === 'completed' ? '2026-07-24T01:02:00Z' : null,
+        finished_at: runPhase === 'completed' ? '2026-07-24T01:02:00Z' : null,
         error_code: null,
         error_message: null,
       })
@@ -238,8 +253,7 @@ async function installPaperBackend(page: Page) {
           : [],
         has_more: false,
         active_run_id: runPhase === 'waiting' ? RUN_ID : null,
-        active_run_status:
-          runPhase === 'waiting' ? 'waiting_approval' : null,
+        active_run_status: runPhase === 'waiting' ? 'waiting_approval' : null,
         active_pause_id: runPhase === 'waiting' ? 'pause-buy' : null,
         active_pause_type: runPhase === 'waiting' ? 'approval' : null,
         active_pause_request:
@@ -279,14 +293,15 @@ async function installPaperBackend(page: Page) {
         unexpectedRequests.push(`invalid preview: ${JSON.stringify(body)}`)
         return json(route, { detail: 'preview draft mismatch' }, 422)
       }
-      previewedArguments = JSON.parse(
-        JSON.stringify(body.draft),
-      ) as Record<string, unknown>
+      previewedArguments = JSON.parse(JSON.stringify(body.draft)) as Record<
+        string,
+        unknown
+      >
       return json(route, {
         draft: previewedArguments,
         quote: {
-          ts_code: '600519.SH',
-          name: '贵州茅台',
+          ts_code: '000001.SZ',
+          name: '平安银行',
           last_price: '1498.00',
           source: 'e2e-fixture',
         },
@@ -323,10 +338,7 @@ async function installPaperBackend(page: Page) {
     ) {
       return json(route, [])
     }
-    if (
-      path === '/api/v0/paper-trading/orders' &&
-      request.method() === 'GET'
-    ) {
+    if (path === '/api/v0/paper-trading/orders' && request.method() === 'GET') {
       return json(
         route,
         orderCreated
@@ -334,8 +346,8 @@ async function installPaperBackend(page: Page) {
               {
                 id: ORDER_ID,
                 account_generation: 1,
-                ts_code: '600519.SH',
-                name: '贵州茅台',
+                ts_code: String(approvedArguments?.ts_code ?? ''),
+                name: String(approvedArguments?.name ?? ''),
                 side: 'buy',
                 order_type: 'limit',
                 quantity: 100,
@@ -383,6 +395,8 @@ test('buy instruction pauses for editable preview, resumes, and appears in the s
   await expect(approval.getByText('模拟买入审批')).toBeVisible()
   expect(backend.requestedPrompts).toEqual(['给我买入100股贵州茅台'])
 
+  await approval.getByLabel('股票代码').fill('000001.SZ')
+  await approval.getByLabel('股票名称').fill('平安银行')
   await approval.getByLabel('限价').fill('1500.00')
   await approval.getByRole('button', { name: /预览/ }).click()
   await expect(approval.getByText('预览有效')).toBeVisible()
@@ -393,7 +407,8 @@ test('buy instruction pauses for editable preview, resumes, and appears in the s
   await expect(page.getByText('模拟买入已提交。')).toBeVisible()
   expect(backend.approvedArguments()).toMatchObject({
     side: 'buy',
-    ts_code: '600519.SH',
+    ts_code: '000001.SZ',
+    name: '平安银行',
     quantity: 100,
     order_type: 'limit',
     limit_price: '1500.00',
@@ -403,8 +418,8 @@ test('buy instruction pauses for editable preview, resumes, and appears in the s
   await page.goto('/paper-trading')
   await expect(page.getByRole('heading', { name: '模拟账户' })).toBeVisible()
   await expect(page.getByLabel('资金概览')).toContainText('849,953.50')
-  const orderRow = page.getByRole('row').filter({ hasText: '600519.SH' })
-  await expect(orderRow).toContainText('贵州茅台')
+  const orderRow = page.getByRole('row').filter({ hasText: '000001.SZ' })
+  await expect(orderRow).toContainText('平安银行')
   await expect(orderRow).toContainText('买入')
   await expect(orderRow).toContainText('1,500.0000')
   await expect(orderRow).toContainText('已成交')

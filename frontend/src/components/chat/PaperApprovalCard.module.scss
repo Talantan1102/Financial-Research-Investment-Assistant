@@ -117,6 +117,12 @@
   }
 }
 
+.fieldError {
+  color: var(--ios-red);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .singleField {
   display: grid;
   gap: 5px;

@@ -6,7 +6,14 @@ import type {
   PaperOrderDraft,
   PaperOrderPreview,
 } from '@/types/paper-trading'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import styles from './PaperApprovalCard.module.scss'
 
 const PAPER_WRITES = new Set([
@@ -192,6 +199,8 @@ export function PaperApprovalCard({
   const [submitting, setSubmitting] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const tsCodeErrorId = useId()
+  const nameErrorId = useId()
   const previewSequence = useRef(0)
   const revision = useRef(0)
   const requestGeneration = useRef(0)
@@ -277,8 +286,16 @@ export function PaperApprovalCard({
   }
 
   const isOrder = selected.call.name === 'place_paper_order'
+  const tsCodeError =
+    isOrder && draft !== null && !draft.ts_code.trim()
+      ? '股票代码不能为空'
+      : null
+  const nameError =
+    isOrder && draft !== null && !draft.name.trim() ? '股票名称不能为空' : null
   const validOrder =
     draft !== null &&
+    tsCodeError === null &&
+    nameError === null &&
     draft.quantity > 0 &&
     (draft.order_type === 'market' || Boolean(draft.limit_price?.trim()))
   const validOther =
@@ -294,15 +311,23 @@ export function PaperApprovalCard({
         : true
   const previewCurrent = isOrder && preview !== null && !dirty
 
+  const invalidatePreview = () => {
+    previewController.current?.abort()
+    previewController.current = null
+    previewSequence.current += 1
+    revision.current += 1
+    setPreviewing(false)
+    setDirty(true)
+    setPreview(null)
+    setError(null)
+  }
+
   const updateOrder = <K extends keyof PaperOrderDraft>(
     key: K,
     value: PaperOrderDraft[K],
   ) => {
     setDraft((current) => (current ? { ...current, [key]: value } : current))
-    revision.current += 1
-    setDirty(true)
-    setPreview(null)
-    setError(null)
+    invalidatePreview()
   }
 
   const updateOther = (key: string, value: string) => {
@@ -355,7 +380,8 @@ export function PaperApprovalCard({
     }
   }
 
-  const effectiveArguments: Record<string, unknown> = draft ?? otherDraft
+  const effectiveArguments: Record<string, unknown> =
+    isOrder && previewCurrent && preview ? preview.draft : (draft ?? otherDraft)
   const approveDisabled =
     disabled ||
     submitting ||
@@ -395,6 +421,45 @@ export function PaperApprovalCard({
 
       {isOrder && draft ? (
         <div className={styles.fields}>
+          <label>
+            股票代码
+            <input
+              aria-describedby={tsCodeError ? tsCodeErrorId : undefined}
+              aria-invalid={tsCodeError ? true : undefined}
+              aria-label="股票代码"
+              autoComplete="off"
+              spellCheck={false}
+              value={draft.ts_code}
+              disabled={disabled || submitting}
+              onChange={(event) => updateOrder('ts_code', event.target.value)}
+            />
+            {tsCodeError ? (
+              <span
+                className={styles.fieldError}
+                id={tsCodeErrorId}
+                role="alert"
+              >
+                {tsCodeError}
+              </span>
+            ) : null}
+          </label>
+          <label>
+            股票名称
+            <input
+              aria-describedby={nameError ? nameErrorId : undefined}
+              aria-invalid={nameError ? true : undefined}
+              aria-label="股票名称"
+              autoComplete="off"
+              value={draft.name}
+              disabled={disabled || submitting}
+              onChange={(event) => updateOrder('name', event.target.value)}
+            />
+            {nameError ? (
+              <span className={styles.fieldError} id={nameErrorId} role="alert">
+                {nameError}
+              </span>
+            ) : null}
+          </label>
           <label>
             方向
             <select
@@ -448,9 +513,7 @@ export function PaperApprovalCard({
                       }
                     : current,
                 )
-                revision.current += 1
-                setDirty(true)
-                setPreview(null)
+                invalidatePreview()
               }}
             >
               <option value="market">市价</option>

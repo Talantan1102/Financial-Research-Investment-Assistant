@@ -94,15 +94,50 @@ describe('<PaperApprovalCard>', () => {
     vi.mocked(previewPaperOrder).mockReset()
   })
 
+  it('shows the proposed stock identity as editable order fields', () => {
+    renderWithProviders(
+      <PaperApprovalCard request={request} onResume={vi.fn()} />,
+    )
+
+    expect(screen.getByRole('textbox', { name: '股票代码' })).toHaveValue(
+      '600519.SH',
+    )
+    expect(screen.getByRole('textbox', { name: '股票名称' })).toHaveValue(
+      '贵州茅台',
+    )
+  })
+
   it('invalidates the old preview after edits and approves only the newly previewed draft', async () => {
     const user = userEvent.setup()
     const onResume = vi.fn(async () => ({ ok: true as const }))
-    vi.mocked(previewPaperOrder).mockResolvedValue(preview)
+    vi.mocked(previewPaperOrder).mockResolvedValue({
+      ...preview,
+      draft: {
+        ...preview.draft,
+        ts_code: '000001.SZ',
+        name: '平安银行',
+      },
+      quote: {
+        ...preview.quote,
+        ts_code: '000001.SZ',
+        name: '平安银行',
+      },
+    })
     renderWithProviders(
       <PaperApprovalCard request={request} onResume={onResume} />,
     )
 
     expect(screen.getByRole('button', { name: '确认买入' })).toBeDisabled()
+    await user.clear(screen.getByRole('textbox', { name: '股票代码' }))
+    await user.type(
+      screen.getByRole('textbox', { name: '股票代码' }),
+      '000001.SZ',
+    )
+    await user.clear(screen.getByRole('textbox', { name: '股票名称' }))
+    await user.type(
+      screen.getByRole('textbox', { name: '股票名称' }),
+      '平安银行',
+    )
     await user.clear(screen.getByLabelText('数量'))
     await user.type(screen.getByLabelText('数量'), '200')
     await user.clear(screen.getByLabelText('限价'))
@@ -114,6 +149,8 @@ describe('<PaperApprovalCard>', () => {
     expect(previewPaperOrder).toHaveBeenCalledWith(
       {
         draft: expect.objectContaining({
+          ts_code: '000001.SZ',
+          name: '平安银行',
           quantity: 200,
           limit_price: '1498.5',
         }),
@@ -127,11 +164,11 @@ describe('<PaperApprovalCard>', () => {
       edited_arguments: {
         'trade-1': {
           side: 'buy',
-          ts_code: '600519.SH',
-          name: '贵州茅台',
+          ts_code: '000001.SZ',
+          name: '平安银行',
           quantity: 200,
           order_type: 'limit',
-          limit_price: '1498.5',
+          limit_price: '1498.5000',
         },
       },
     })
@@ -148,7 +185,7 @@ describe('<PaperApprovalCard>', () => {
     expect(onResume).toHaveBeenCalledWith({ approved: false })
   })
 
-  it('ignores a stale preview response after the draft changes', async () => {
+  it('accepts only the latest preview after rapid stock identity edits', async () => {
     const user = userEvent.setup()
     let resolveFirst!: (value: typeof preview) => void
     vi.mocked(previewPaperOrder)
@@ -161,19 +198,105 @@ describe('<PaperApprovalCard>', () => {
       .mockResolvedValueOnce({
         ...preview,
         estimated_cash_required: '449639.36',
-        draft: { ...preview.draft, quantity: 300 },
+        draft: {
+          ...preview.draft,
+          ts_code: '000001.SZ',
+          name: '平安银行',
+        },
       })
     renderWithProviders(
       <PaperApprovalCard request={request} onResume={vi.fn()} />,
     )
 
     await user.click(screen.getByRole('button', { name: '预览交易' }))
-    await user.clear(screen.getByLabelText('数量'))
-    await user.type(screen.getByLabelText('数量'), '300')
+    await user.clear(screen.getByRole('textbox', { name: '股票代码' }))
+    await user.type(
+      screen.getByRole('textbox', { name: '股票代码' }),
+      '000001.SZ',
+    )
+    await user.clear(screen.getByRole('textbox', { name: '股票名称' }))
+    await user.type(
+      screen.getByRole('textbox', { name: '股票名称' }),
+      '平安银行',
+    )
     await user.click(screen.getByRole('button', { name: '重新预览' }))
+    expect(previewPaperOrder).toHaveBeenLastCalledWith(
+      {
+        draft: expect.objectContaining({
+          ts_code: '000001.SZ',
+          name: '平安银行',
+        }),
+      },
+      { signal: expect.any(AbortSignal) },
+    )
     expect(await screen.findByText('¥449,639.36')).toBeInTheDocument()
     act(() => resolveFirst(preview))
     expect(screen.queryByText('¥299,792.91')).not.toBeInTheDocument()
+  })
+
+  it('shows stock identity validation inline and keeps preview and approval closed', async () => {
+    const user = userEvent.setup()
+    renderWithProviders(
+      <PaperApprovalCard request={request} onResume={vi.fn()} />,
+    )
+
+    const code = screen.getByRole('textbox', { name: '股票代码' })
+    const name = screen.getByRole('textbox', { name: '股票名称' })
+    await user.clear(code)
+    await user.type(code, '   ')
+    await user.clear(name)
+
+    expect(screen.getByText('股票代码不能为空')).toBeInTheDocument()
+    expect(screen.getByText('股票名称不能为空')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重新预览' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '确认买入' })).toBeDisabled()
+    expect(previewPaperOrder).not.toHaveBeenCalled()
+  })
+
+  it('keeps stock validation descriptions unique across approval cards', async () => {
+    const user = userEvent.setup()
+    renderWithProviders(
+      <>
+        <PaperApprovalCard request={request} onResume={vi.fn()} />
+        <PaperApprovalCard request={request} onResume={vi.fn()} />
+      </>,
+    )
+
+    const codeInputs = screen.getAllByRole('textbox', { name: '股票代码' })
+    await user.clear(codeInputs[0])
+    await user.clear(codeInputs[1])
+
+    const descriptionIds = codeInputs.map((input) =>
+      input.getAttribute('aria-describedby'),
+    )
+    expect(descriptionIds[0]).toBeTruthy()
+    expect(descriptionIds[1]).toBeTruthy()
+    expect(descriptionIds[0]).not.toBe(descriptionIds[1])
+    for (const id of descriptionIds) {
+      expect(document.getElementById(id!)).toHaveTextContent('股票代码不能为空')
+    }
+  })
+
+  it('keeps approval disabled after a stock preview failure', async () => {
+    const user = userEvent.setup()
+    vi.mocked(previewPaperOrder).mockRejectedValue(
+      new Error('没有找到该股票行情'),
+    )
+    renderWithProviders(
+      <PaperApprovalCard request={request} onResume={vi.fn()} />,
+    )
+
+    await user.clear(screen.getByRole('textbox', { name: '股票代码' }))
+    await user.type(
+      screen.getByRole('textbox', { name: '股票代码' }),
+      '000001.SZ',
+    )
+    await user.click(screen.getByRole('button', { name: '重新预览' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '没有找到该股票行情',
+    )
+    expect(screen.getByRole('button', { name: '确认买入' })).toBeDisabled()
   })
 
   it('aborts the previous preview and treats AbortError as silent control flow', async () => {
@@ -423,5 +546,53 @@ describe('<PaperApprovalCard>', () => {
       approved: true,
       edited_arguments: { 'reset-1': { initial_cash: '800000.00' } },
     })
+  })
+
+  it('does not show stock identity fields on reset or cancel cards', () => {
+    const rendered = renderWithProviders(
+      <PaperApprovalCard
+        request={{
+          tool_calls: [
+            {
+              id: 'reset-1',
+              name: 'reset_paper_account',
+              arguments: { initial_cash: '1000000.00' },
+            },
+          ],
+          editable_tool_call_ids: ['reset-1'],
+        }}
+        onResume={vi.fn()}
+      />,
+    )
+    expect(
+      screen.queryByRole('textbox', { name: '股票代码' }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('textbox', { name: '股票名称' }),
+    ).not.toBeInTheDocument()
+
+    rendered.rerender(
+      <PaperApprovalCard
+        request={{
+          tool_calls: [
+            {
+              id: 'cancel-1',
+              name: 'cancel_paper_order',
+              arguments: {
+                order_id: '11111111-1111-4111-8111-111111111111',
+              },
+            },
+          ],
+          editable_tool_call_ids: ['cancel-1'],
+        }}
+        onResume={vi.fn()}
+      />,
+    )
+    expect(
+      screen.queryByRole('textbox', { name: '股票代码' }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('textbox', { name: '股票名称' }),
+    ).not.toBeInTheDocument()
   })
 })
