@@ -15,6 +15,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.models.investor_suitability import Market
 from app.models.paper_account import PaperAccount, PaperAccountStatus, PaperHoldingLot
 from app.models.paper_order import (
     OrderSide,
@@ -27,6 +28,7 @@ from app.models.paper_order import (
     PaperOrder,
 )
 from app.schemas.paper_trading import OrderDraft, OrderDraftPreview, OrderPreview
+from app.services.investor_suitability.instruments import classify_market
 from app.services.paper_trading.account_service import PaperAccountService
 from app.services.paper_trading.clock import TradingClock
 from app.services.paper_trading.errors import PaperTradingError
@@ -36,7 +38,7 @@ from app.services.paper_trading.rulebook import RuleBook
 from app.services.paper_trading.types import MarketPhase, QuoteLevel, RealtimeQuote, RuleSet
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
-_TS_CODE = re.compile(r"\d{6}\.(?:SH|SZ)")
+_TS_CODE = re.compile(r"\d{6}\.(?:SH|SZ|BJ)")
 _CENT = Decimal("0.01")
 _PROPOSAL_UNIQUE_CONSTRAINT = "uq_paper_orders_account_generation_proposal"
 _MAX_CONFIRMATION_ID_LENGTH = 128
@@ -1358,16 +1360,12 @@ def _require_text(value: object, *, field: str, maximum: int) -> str:
 
 
 def _board(ts_code: str) -> str:
-    code, exchange = ts_code.split(".", maxsplit=1)
-    if exchange == "SH" and code.startswith(("688", "689")):
-        return "star"
-    if exchange == "SZ" and code.startswith(("300", "301")):
-        return "chinext"
-    if (exchange == "SH" and code.startswith(("600", "601", "603", "605"))) or (
-        exchange == "SZ" and code.startswith(("000", "001", "002", "003"))
-    ):
-        return "main"
-    raise PaperTradingError("unsupported_trading_regime", "首版不支持该证券板块")
+    return {
+        Market.MAIN: "main",
+        Market.CHINEXT: "chinext",
+        Market.STAR: "star",
+        Market.BSE: "bse",
+    }[classify_market(ts_code)]
 
 
 def _risk_warning(name: str) -> bool:

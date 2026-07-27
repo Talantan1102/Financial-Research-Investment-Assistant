@@ -265,7 +265,21 @@ async def test_normalizes_requested_ts_code_before_fetch() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("ts_code", ["", "600519", "ABC519.SH", "600519.BJ", "600519.SH,000001.SZ"])
+async def test_accepts_bse_ts_code_before_fetching() -> None:
+    calls: list[str] = []
+
+    def fetch(ts_code: str) -> pd.DataFrame:
+        calls.append(ts_code)
+        return pd.DataFrame([_quote_row(TS_CODE=ts_code)])
+
+    quote = await TushareRealtimeQuoteProvider(fetch=fetch).get(" 920001.bj ")
+
+    assert calls == ["920001.BJ"]
+    assert quote.ts_code == "920001.BJ"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ts_code", ["", "600519", "ABC519.SH", "600519.HK", "600519.SH,000001.SZ"])
 async def test_rejects_invalid_requested_ts_code_without_fetching(ts_code: str) -> None:
     called = False
 
