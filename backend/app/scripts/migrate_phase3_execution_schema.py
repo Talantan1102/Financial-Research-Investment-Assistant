@@ -447,6 +447,48 @@ def _upgrade_tool_runtime_observation_columns(connection: Connection, changes: l
     changes.append("add run_tool_executions runtime risk observation columns")
 
 
+def _upgrade_run_outcome_contract(connection: Connection, changes: list[str]) -> None:
+    """Add the durable completed-run outcome contract without inventing values.
+
+    Pre-outcome deployments have neither nullable column.  A partially deployed
+    contract is only safe to finish when its existing column already matches the
+    ORM contract; otherwise fail rather than silently reinterpret persisted data.
+    """
+    table = app.models.Run.__table__
+    expected_columns = {
+        column.name: column
+        for column in table.columns
+        if column.name in {"outcome_code", "outcome_payload"}
+    }
+    actual_columns = {
+        column["name"]: column for column in inspect(connection).get_columns("runs")
+    }
+
+    for name, expected in expected_columns.items():
+        actual = actual_columns.get(name)
+        if actual is None:
+            continue
+        if (
+            bool(actual["nullable"]) != bool(expected.nullable)
+            or _type_sql(actual["type"], connection) != _type_sql(expected.type, connection)
+            or _default_sql(actual.get("default"))
+            != _default_sql(getattr(expected.server_default, "arg", None))
+        ):
+            raise _unsafe(f"runs.{name} outcome column differs")
+
+    if "outcome_code" not in actual_columns:
+        connection.execute(text("ALTER TABLE runs ADD COLUMN outcome_code varchar(64)"))
+        changes.append("add runs.outcome_code")
+    if "outcome_payload" not in actual_columns:
+        connection.execute(text("ALTER TABLE runs ADD COLUMN outcome_payload jsonb"))
+        changes.append("add runs.outcome_payload")
+
+    # The canonical checker compares PostgreSQL-rendered definitions rather than
+    # names, so a same-named weaker CHECK is rebuilt here and rejected by the
+    # read-only startup gate before an operator applies this migration.
+    _repair_checks(connection, table, changes)
+
+
 def _validate_uniques(connection: Connection, table: Table) -> None:
     actual = {
         (unique["name"], tuple(unique["column_names"]))
@@ -603,6 +645,7 @@ def migrate_phase3_execution_schema(
             connection.execute(text("DROP INDEX ix_runs_tenant_session_revision_seq"))
             changes.append("drop redundant ix_runs_tenant_session_revision_seq")
         _ensure_revision_unique(connection, changes)
+        _upgrade_run_outcome_contract(connection, changes)
         run_indexes = {index["name"]: index for index in inspect(connection).get_indexes("runs")}
         for index_name in ("ix_runs_replaces_run_id",):
             expected = next(

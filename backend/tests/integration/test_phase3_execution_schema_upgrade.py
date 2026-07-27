@@ -1040,3 +1040,69 @@ def test_operator_migration_completes_old_schema_then_verifies_and_is_idempotent
     assert migrate_phase3_execution_schema(isolated_schema_engine)
     verify_phase3_execution_schema(isolated_schema_engine)
     assert migrate_phase3_execution_schema(isolated_schema_engine) == ()
+
+
+def test_operator_migration_adds_durable_action_required_outcome_contract(
+    isolated_schema_engine: Engine,
+) -> None:
+    """Legacy runs gain the exact outcome columns and CHECKs, once only."""
+    with isolated_schema_engine.begin() as connection:
+        connection.execute(
+            text("ALTER TABLE runs DROP CONSTRAINT ck_runs_outcome_code_payload_pair")
+        )
+        connection.execute(text("ALTER TABLE runs DROP CONSTRAINT ck_runs_fixed_outcome_code"))
+        connection.execute(text("ALTER TABLE runs DROP COLUMN outcome_payload"))
+        connection.execute(text("ALTER TABLE runs DROP COLUMN outcome_code"))
+
+    assert migrate_phase3_execution_schema(isolated_schema_engine)
+
+    with isolated_schema_engine.connect() as connection:
+        columns = {
+            name: data_type
+            for name, data_type in connection.execute(
+                text(
+                    "SELECT a.attname, format_type(a.atttypid, a.atttypmod) "
+                    "FROM pg_attribute AS a "
+                    "WHERE a.attrelid = 'runs'::regclass "
+                    "AND a.attnum > 0 AND NOT a.attisdropped "
+                    "AND a.attname IN ('outcome_code', 'outcome_payload')"
+                )
+            )
+        }
+        constraints = dict(
+            connection.execute(
+                text(
+                    "SELECT conname, pg_get_constraintdef(oid, false) "
+                    "FROM pg_constraint "
+                    "WHERE conrelid = 'runs'::regclass "
+                    "AND conname IN ("
+                    "'ck_runs_outcome_code_payload_pair', 'ck_runs_fixed_outcome_code')"
+                )
+            ).all()
+        )
+
+    assert columns == {"outcome_code": "character varying(64)", "outcome_payload": "jsonb"}
+    assert constraints == {
+        "ck_runs_outcome_code_payload_pair": "CHECK (((outcome_code IS NULL) = (outcome_payload IS NULL)))",
+        "ck_runs_fixed_outcome_code": "CHECK (((outcome_code IS NULL) OR ((outcome_code)::text = 'action_required'::text)))",
+    }
+    assert migrate_phase3_execution_schema(isolated_schema_engine) == ()
+
+
+def test_run_control_gate_rejects_same_named_wrong_outcome_pair_constraint(
+    isolated_schema_engine: Engine,
+) -> None:
+    """A matching CHECK name cannot disguise a weaker persisted business invariant."""
+    with isolated_schema_engine.begin() as connection:
+        connection.execute(
+            text("ALTER TABLE runs DROP CONSTRAINT ck_runs_outcome_code_payload_pair")
+        )
+        connection.execute(
+            text(
+                "ALTER TABLE runs ADD CONSTRAINT ck_runs_outcome_code_payload_pair "
+                "CHECK (outcome_code IS NULL OR outcome_payload IS NOT NULL)"
+            )
+        )
+
+    with pytest.raises(RuntimeError, match="runs CHECK constraints differ"):
+        verify_run_control_schema(isolated_schema_engine)
