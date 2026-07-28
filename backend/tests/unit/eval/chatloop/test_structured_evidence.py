@@ -3,8 +3,14 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from app.chatloop.state import ChatLoopState
+from eval.chatloop.assertion_engine import AssertionEngine, AssertionResultKind
 from eval.chatloop.business_pipeline import InvalidEvidenceError
-from eval.chatloop.business_runner import BusinessObservation, BusinessTrialResult
+from eval.chatloop.business_runner import (
+    BusinessObservation,
+    BusinessTrialResult,
+    extract_business_tool_ledger,
+)
 from eval.chatloop.case_loader import load_catalog
 from eval.chatloop.case_schema import (
     AssertionSpec,
@@ -516,6 +522,330 @@ async def test_missing_answer_or_evidence_path_is_invalid_not_judge_synthesized(
         await provider.build(_case(assertions), _result())
 
     assert judge.calls == []
+
+
+def _available_tool_case(assertion: AssertionSpec, tool_name: str) -> ConversationCase:
+    return _case([assertion]).model_copy(update={"available_tools": [tool_name]})
+
+
+def _direct_tool_state(*, tool_content: Any, include_response: bool = True) -> ChatLoopState:
+    messages: list[dict[str, Any]] = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "cancel-1",
+                    "type": "function",
+                    "function": {
+                        "name": "cancel_paper_order",
+                        "arguments": '{"order_id":"00000000-0000-4000-8000-00000000b707"}',
+                    },
+                }
+            ],
+        }
+    ]
+    if include_response:
+        messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": "cancel-1",
+                "content": tool_content,
+            }
+        )
+    return ChatLoopState(
+        user_id="eval-user",
+        session_id="eval-session",
+        request_id="eval-request",
+        messages=messages,
+    )
+
+
+@pytest.mark.asyncio
+async def test_direct_error_response_is_valid_negative_assertion_failure_end_to_end() -> None:
+    assertion = AssertionSpec(
+        assertion_id="direct-cancel-result",
+        source="tools",
+        operator="equals",
+        path="cancel_paper_order.calls.0.result.status",
+        expected="cancelled",
+    )
+    case = _available_tool_case(assertion, "cancel_paper_order")
+    ledger = extract_business_tool_ledger(
+        _direct_tool_state(tool_content="[ERROR] order is no longer cancellable")
+    )
+    provider = BusinessStructuredEvidenceProvider(versions={"model": "fake"}, semantic_judge=None)
+
+    evidence = await provider.build(case, _result(ledger=ledger))
+    result = AssertionEngine().evaluate(assertion, observation=evidence)
+
+    call = evidence["tools"]["cancel_paper_order"]["calls"][0]
+    assert call["status"] == "failed"
+    assert call["result"] is None
+    assert call["error_code"] == "tool_error"
+    assert call["error_message"] == call["error"] == "order is no longer cancellable"
+    assert result.kind is AssertionResultKind.ASSERTION_FAILED
+    assert result.actual == "<missing_path>"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("state", "expected_error"),
+    (
+        (
+            _direct_tool_state(tool_content=None, include_response=False),
+            "missing tool response",
+        ),
+        (
+            _direct_tool_state(tool_content="not-json"),
+            "tool response is not valid JSON",
+        ),
+        (
+            _direct_tool_state(tool_content={"unexpected": "mapping"}),
+            "tool response has invalid structure",
+        ),
+    ),
+)
+async def test_direct_missing_or_damaged_response_is_invalid_evidence_end_to_end(
+    state: ChatLoopState,
+    expected_error: str,
+) -> None:
+    assertion = AssertionSpec(
+        assertion_id="direct-cancel-result",
+        source="tools",
+        operator="equals",
+        path="cancel_paper_order.calls.0.result.status",
+        expected="cancelled",
+    )
+    case = _available_tool_case(assertion, "cancel_paper_order")
+    ledger = extract_business_tool_ledger(state)
+    provider = BusinessStructuredEvidenceProvider(versions={"model": "fake"}, semantic_judge=None)
+
+    assert ledger[0]["error"] == expected_error
+    assert "status" not in ledger[0]
+    with pytest.raises(InvalidEvidenceError, match="missing deterministic evidence"):
+        await provider.build(case, _result(ledger=ledger))
+
+
+@pytest.mark.asyncio
+async def test_zero_calls_for_available_tool_is_valid_negative_evidence() -> None:
+    assertion = AssertionSpec(
+        assertion_id="cancel-result",
+        source="tools",
+        operator="equals",
+        path="cancel_paper_order.calls.0.result.status",
+        expected="cancelled",
+    )
+    case = _available_tool_case(assertion, "cancel_paper_order")
+    provider = BusinessStructuredEvidenceProvider(versions={"model": "fake"}, semantic_judge=None)
+
+    evidence = await provider.build(case, _result(ledger=()))
+    result = AssertionEngine().evaluate(assertion, observation=evidence)
+
+    assert evidence["tools"]["called"] == []
+    assert result.kind is AssertionResultKind.ASSERTION_FAILED
+    assert result.actual == "<missing_path>"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "path",
+    (
+        "cancel_paper_order.calls.0.result.status",
+        "cancel_paper_order.last_call.result.status",
+    ),
+)
+async def test_approval_pending_null_result_is_valid_negative_evidence(path: str) -> None:
+    assertion = AssertionSpec(
+        assertion_id="cancel-result",
+        source="tools",
+        operator="equals",
+        path=path,
+        expected="cancelled",
+    )
+    case = _available_tool_case(assertion, "cancel_paper_order")
+    provider = BusinessStructuredEvidenceProvider(versions={"model": "fake"}, semantic_judge=None)
+    ledger = (
+        {
+            "tool_name": "cancel_paper_order",
+            "arguments": {"order_id": "00000000-0000-4000-8000-00000000b707"},
+            "result": None,
+            "status": "approval_required",
+            "error": None,
+        },
+    )
+
+    evidence = await provider.build(case, _result(ledger=ledger))
+    result = AssertionEngine().evaluate(assertion, observation=evidence)
+
+    assert result.kind is AssertionResultKind.ASSERTION_FAILED
+    assert result.actual == "<missing_path>"
+
+
+@pytest.mark.asyncio
+async def test_missing_second_indexed_call_is_valid_negative_evidence() -> None:
+    assertion = AssertionSpec(
+        assertion_id="second-query",
+        source="tools",
+        operator="equals",
+        path="get_paper_order.calls.1.result.status",
+        expected="cancelled",
+    )
+    case = _available_tool_case(assertion, "get_paper_order")
+    provider = BusinessStructuredEvidenceProvider(versions={"model": "fake"}, semantic_judge=None)
+    ledger = (
+        {
+            "tool_name": "get_paper_order",
+            "arguments": {"order_id": "00000000-0000-4000-8000-00000000b707"},
+            "result": {"status": "partially_filled"},
+            "status": "completed",
+            "error": None,
+        },
+    )
+
+    evidence = await provider.build(case, _result(ledger=ledger))
+    result = AssertionEngine().evaluate(assertion, observation=evidence)
+
+    assert result.kind is AssertionResultKind.ASSERTION_FAILED
+    assert result.actual == "<missing_path>"
+
+
+@pytest.mark.asyncio
+async def test_executed_indexed_call_with_missing_result_field_is_invalid_evidence() -> None:
+    assertion = AssertionSpec(
+        assertion_id="first-query",
+        source="tools",
+        operator="equals",
+        path="get_paper_order.calls.0.result.status",
+        expected="cancelled",
+    )
+    case = _available_tool_case(assertion, "get_paper_order")
+    provider = BusinessStructuredEvidenceProvider(versions={"model": "fake"}, semantic_judge=None)
+    ledger = (
+        {
+            "tool_name": "get_paper_order",
+            "arguments": {"order_id": "00000000-0000-4000-8000-00000000b707"},
+            "result": {"quantity": 1000},
+            "status": "completed",
+            "error": None,
+        },
+    )
+
+    with pytest.raises(InvalidEvidenceError, match="missing deterministic evidence"):
+        await provider.build(case, _result(ledger=ledger))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ("failed", "cancelled", "timeout"))
+async def test_terminal_negative_tool_result_is_valid_negative_evidence(status: str) -> None:
+    assertion = AssertionSpec(
+        assertion_id="terminal-result",
+        source="tools",
+        operator="equals",
+        path="cancel_paper_order.calls.0.result.status",
+        expected="cancelled",
+    )
+    case = _available_tool_case(assertion, "cancel_paper_order")
+    provider = BusinessStructuredEvidenceProvider(versions={"model": "fake"}, semantic_judge=None)
+    ledger = (
+        {
+            "tool_name": "cancel_paper_order",
+            "arguments": {"order_id": "00000000-0000-4000-8000-00000000b707"},
+            "result": None,
+            "status": status,
+            "error": f"cancel ended as {status}",
+            "error_code": status,
+            "error_message": f"cancel ended as {status}",
+        },
+    )
+
+    evidence = await provider.build(case, _result(ledger=ledger))
+    result = AssertionEngine().evaluate(assertion, observation=evidence)
+
+    assert result.kind is AssertionResultKind.ASSERTION_FAILED
+    assert result.actual == "<missing_path>"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", (None, "", "mystery"))
+async def test_null_empty_or_unknown_tool_status_is_invalid_evidence(status: str | None) -> None:
+    assertion = AssertionSpec(
+        assertion_id="unknown-result",
+        source="tools",
+        operator="equals",
+        path="cancel_paper_order.calls.0.result.status",
+        expected="cancelled",
+    )
+    case = _available_tool_case(assertion, "cancel_paper_order")
+    provider = BusinessStructuredEvidenceProvider(versions={"model": "fake"}, semantic_judge=None)
+    ledger = (
+        {
+            "tool_name": "cancel_paper_order",
+            "arguments": {},
+            "result": None,
+            "status": status,
+            "error": "unknown terminal state",
+            "error_code": "unknown",
+            "error_message": "unknown terminal state",
+        },
+    )
+
+    with pytest.raises(InvalidEvidenceError, match="missing deterministic evidence"):
+        await provider.build(case, _result(ledger=ledger))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "ledger",
+    (
+        (
+            {
+                "tool_name": "cancel_paper_order",
+                "arguments": {},
+                "status": "failed",
+                "error": "failed without result field",
+                "error_code": "failed",
+                "error_message": "failed without result field",
+            },
+        ),
+        (
+            {
+                "tool_name": "cancel_paper_order",
+                "arguments": {},
+                "result": None,
+                "status": "failed",
+                "error": None,
+                "error_code": None,
+                "error_message": None,
+            },
+        ),
+        (
+            {
+                "tool_name": "cancel_paper_order",
+                "arguments": {},
+                "result": None,
+                "status": "failed",
+                "error": "failure without complete error metadata",
+                "error_message": "failure without complete error metadata",
+            },
+        ),
+    ),
+)
+async def test_damaged_terminal_negative_tool_evidence_is_invalid(
+    ledger: tuple[dict[str, Any], ...],
+) -> None:
+    assertion = AssertionSpec(
+        assertion_id="damaged-result",
+        source="tools",
+        operator="equals",
+        path="cancel_paper_order.calls.0.result.status",
+        expected="cancelled",
+    )
+    case = _available_tool_case(assertion, "cancel_paper_order")
+    provider = BusinessStructuredEvidenceProvider(versions={"model": "fake"}, semantic_judge=None)
+
+    with pytest.raises(InvalidEvidenceError, match="missing deterministic evidence"):
+        await provider.build(case, _result(ledger=ledger))
 
 
 @pytest.mark.asyncio

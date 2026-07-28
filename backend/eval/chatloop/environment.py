@@ -79,7 +79,7 @@ from app.services.trade_service import TradeService
 from app.services.watchlist_service import ChangeSource, WatchlistService
 from sqlalchemy import delete, select, text, update
 
-from eval.chatloop.case_schema import ConversationCase
+from eval.chatloop.case_schema import ConversationCase, validate_order_alias
 from eval.chatloop.disposable_runtime import DisposableEvalRuntime
 
 _ROLE_NAMES = ("creator", "other_user", "tenant_admin", "anonymous")
@@ -144,6 +144,7 @@ class SeedManifest:
     order_ids: list[str] = field(default_factory=list)
     support_order_ids: list[str] = field(default_factory=list)
     order_aliases: dict[str, str] = field(default_factory=dict)
+    order_alias_owners: dict[str, str] = field(default_factory=dict)
     fill_ids: list[str] = field(default_factory=list)
     match_pass_ids: list[str] = field(default_factory=list)
     holding_lot_ids: list[str] = field(default_factory=list)
@@ -177,7 +178,7 @@ class SeedManifest:
     memory_retrieval_feedback_ids: list[str] = field(default_factory=list)
     pending_milvus_edge_ids: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> dict[str, list[Any]]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serializable copy suitable for the evidence artifact."""
         return asdict(self)
 
@@ -210,6 +211,55 @@ class TrialEnvironment:
             return self.actors[name]
         except KeyError as exc:
             raise KeyError(f"unknown eval actor {name!r} for {self.case_id}") from exc
+
+    def resolve_order_alias(self, alias: str) -> UUID:
+        """Resolve a catalog-only order alias to the UUID created for this trial."""
+        try:
+            return UUID(self.manifest.order_aliases[alias])
+        except KeyError as exc:
+            raise KeyError(f"unknown order alias {alias!r} for {self.case_id}") from exc
+
+    async def apply_order_fill(
+        self,
+        *,
+        order_alias: str,
+        quantity: int,
+        expected_user_id: UUID,
+        requester_user_id: UUID,
+    ) -> None:
+        """Apply a real settlement while an eval Run is paused for approval.
+
+        This evaluator-only hook deliberately reuses the production settlement
+        service. It never fabricates a timeline or mutates production wiring.
+        """
+        if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity <= 0:
+            raise ValueError("eval fill quantity must be a positive integer")
+        if expected_user_id != requester_user_id:
+            raise PermissionError("eval fill expected owner and requester must match")
+        try:
+            raw_manifest_owner = self.manifest.order_alias_owners[order_alias]
+        except KeyError as exc:
+            raise ValueError(f"order alias {order_alias!r} is missing owner") from exc
+        try:
+            manifest_owner = UUID(raw_manifest_owner)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"order alias {order_alias!r} has invalid owner UUID") from exc
+        if manifest_owner != expected_user_id or manifest_owner != requester_user_id:
+            raise PermissionError("eval fill manifest owner does not match requester")
+        order_id = self.resolve_order_alias(order_alias)
+
+        async with self.session_factory() as session, session.begin():
+            fill_id = await session.run_sync(
+                lambda sync_session: _apply_eval_order_fill(
+                    sync_session,
+                    order_id=order_id,
+                    quantity=quantity,
+                    expected_user_id=expected_user_id,
+                    requester_user_id=requester_user_id,
+                )
+            )
+        _extend_unique(self.manifest.fill_ids, [str(fill_id)])
+        await self._refresh_owned_manifest()
 
     async def snapshot(self, *, actor_name: str = "creator") -> dict[str, Any]:
         """Read a deterministic, user-scoped financial state projection."""
@@ -1577,6 +1627,14 @@ class CaseEnvironmentManager:
                 ("creator", {"symbol": "000001", "order_qty": 100, "status": "open"})
                 for _ in range(int(order_state["active_count"]))
             ]
+        aliases: set[str] = set()
+        for _role, spec in records:
+            if "order_id" not in spec:
+                continue
+            alias = validate_order_alias(spec["order_id"])
+            if alias in aliases or alias in manifest.order_aliases:
+                raise ValueError(f"duplicate order alias {alias!r}")
+            aliases.add(alias)
         for index, (role, spec) in enumerate(records):
             account = await _ensure_account(
                 session,
@@ -1599,9 +1657,10 @@ class CaseEnvironmentManager:
                 )
             )
             manifest.order_ids.append(str(row.id))
-            alias = spec.get("order_id")
-            if alias:
-                manifest.order_aliases[str(alias)] = str(row.id)
+            if "order_id" in spec:
+                alias = validate_order_alias(spec["order_id"])
+                manifest.order_aliases[alias] = str(row.id)
+                manifest.order_alias_owners[alias] = str(_required_user_id(actors[role]))
 
     async def _seed_entitlements(
         self,
@@ -2545,6 +2604,84 @@ def _execute_seed_order(
             f"production order seed reached {order.status.value}, expected {expected_status.value}"
         )
     return order
+
+
+def _apply_eval_order_fill(
+    session: Any,
+    *,
+    order_id: UUID,
+    quantity: int,
+    expected_user_id: UUID,
+    requester_user_id: UUID,
+) -> UUID:
+    """Settle one deterministic fill through the production domain service."""
+    if expected_user_id != requester_user_id:
+        raise PermissionError("eval fill expected owner and requester must match")
+    order = session.scalar(
+        select(PaperOrder).where(
+            PaperOrder.id == order_id,
+            PaperOrder.user_id == requester_user_id,
+        )
+    )
+    if order is None:
+        existing_order = session.get(PaperOrder, order_id)
+        if existing_order is None:
+            raise KeyError(f"eval order {order_id} no longer exists")
+        raise PermissionError("eval order database owner does not match requester")
+    if order.status not in {OrderStatus.OPEN, OrderStatus.PARTIALLY_FILLED}:
+        raise ValueError(f"eval order {order_id} is not open for settlement")
+    remaining = int(order.quantity) - int(order.filled_quantity)
+    if quantity > remaining:
+        raise ValueError(
+            f"eval fill quantity {quantity} exceeds remaining order quantity {remaining}"
+        )
+
+    if order.confirmed_at is None:
+        raise ValueError(f"eval order {order_id} was not confirmed")
+    match_time = cast(datetime, order.confirmed_at) + timedelta(seconds=2)
+    price = Decimal(str(order.limit_price or "11.20"))
+    quote = _seed_quote(
+        ts_code=str(order.ts_code),
+        name=str(order.name),
+        quoted_at=match_time,
+        price=price,
+        visible_quantity=quantity,
+    )
+    execution = Execution(price=price, quantity=quantity)
+    evidence = MatchQuoteEvidence(
+        quote=quote,
+        consumed_levels=tuple(
+            match_visible_depth(
+                side=cast(OrderSide, order.side),
+                order_type=cast(OrderType, order.order_type),
+                remaining=remaining,
+                limit_price=cast(Decimal | None, order.limit_price),
+                quote=quote,
+            )
+        ),
+        execution_index=0,
+        remaining_before_match=remaining,
+    )
+    calendar = FixedTradingCalendar(
+        {
+            match_time.date(),
+            match_time.date() + timedelta(days=1),
+            match_time.date() + timedelta(days=2),
+        }
+    )
+    fill = PaperSettlementService(
+        session,
+        calendar=calendar,
+        now=lambda: match_time,
+        evidence_provider=lambda **_: evidence,
+    ).apply(
+        order_id=order_id,
+        execution=execution,
+        quote_timestamp=match_time,
+        match_pass=1,
+    )
+    session.flush()
+    return cast(UUID, fill.id)
 
 
 def _seed_quote(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from types import SimpleNamespace
 from typing import Any
@@ -44,7 +45,7 @@ from eval.chatloop.disposable_runtime import (
 )
 from eval.chatloop.durable_runtime import InProcessDurableDriver
 from eval.chatloop.environment import CaseEnvironmentManager
-from eval.chatloop.faults import DeterministicBarrier, TransportFaultPlan
+from eval.chatloop.faults import DeterministicBarrier, FaultPlan, TransportFaultPlan
 from eval.chatloop.policy_registry import PolicyRegistry
 from eval.chatloop.structured_evidence import BusinessStructuredEvidenceProvider
 from eval.chatloop.sut_runner import DurableRunHttpTransport
@@ -195,6 +196,53 @@ class _B805ScriptedLLM:
             ),
             tool_calls=[],
             finish_reason="stop",
+            prompt_tokens=2,
+            completion_tokens=1,
+            cached_tokens=0,
+            cost_cny=0.0,
+        )
+
+
+class _B7CancelScriptedLLM:
+    provider = "scripted"
+    default_model = "scripted-v1"
+
+    def __init__(self, *, filled_quantity: int) -> None:
+        self.order_id: UUID | None = None
+        self.filled_quantity = filled_quantity
+        self._step = 0
+
+    async def stream_step(self, **_kwargs: Any) -> StepResult:
+        if self.order_id is None:
+            raise RuntimeError("B7 scripted LLM needs the trial order UUID")
+        self._step += 1
+        if self._step in {1, 3}:
+            call = StepToolCall(
+                id=f"call-b7-get-{self._step}",
+                name="get_paper_order",
+                arguments=json.dumps({"order_id": str(self.order_id)}),
+            )
+        elif self._step == 2:
+            call = StepToolCall(
+                id="call-b7-cancel",
+                name="cancel_paper_order",
+                arguments=json.dumps({"order_id": str(self.order_id)}),
+            )
+        else:
+            remaining = 1000 - self.filled_quantity
+            return StepResult(
+                content=(f"{self.filled_quantity}股已经成交，撤不回；撤掉的是剩余{remaining}股。"),
+                tool_calls=[],
+                finish_reason="stop",
+                prompt_tokens=2,
+                completion_tokens=1,
+                cached_tokens=0,
+                cost_cny=0.0,
+            )
+        return StepResult(
+            content="",
+            tool_calls=[call],
+            finish_reason="tool_calls",
             prompt_tokens=2,
             completion_tokens=1,
             cached_tokens=0,
@@ -750,6 +798,185 @@ async def test_b8_05_runs_real_durable_market_permission_chain(
         assert structured["tools"]["get_entitlement_application_link"]["attempt_count"] == 1
         assert evaluated.trial_status is TrialStatus.VALID
         assert evaluated.task_pass is True
+    finally:
+        if environment is not None:
+            await environment.cleanup()
+        if driver is not None:
+            await driver.aclose()
+        await runtime.aclose()
+
+    assert not _database_exists(admin_dsn, runtime.database_name)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("case_id", "filled_before", "filled_after"),
+    (("B7-07", 300, 300), ("B7-09", 0, 200)),
+)
+async def test_b7_cancel_real_durable_chain_exposes_resume_capability_gap(
+    pg_test_container: dict[str, object],
+    tmp_path: Any,
+    case_id: str,
+    filled_before: int,
+    filled_after: int,
+) -> None:
+    admin_dsn = _admin_dsn(pg_test_container)
+    runtime = DisposableEvalRuntime.provision(
+        admin_dsn=admin_dsn,
+        run_id=f"durable-{case_id.lower()}-{uuid4().hex}",
+    )
+    driver: InProcessDurableDriver | None = None
+    environment = None
+    try:
+        llm = _B7CancelScriptedLLM(filled_quantity=filled_after)
+        skills_root = tmp_path / case_id / "skills"
+        workdir_root = tmp_path / case_id / "workdirs"
+        skills_root.mkdir(parents=True)
+        singletons = await build_heavy_singletons(
+            session_factory=runtime.async_session_factory,
+            sync_session_factory=runtime.sync_session_factory,
+            mcp_client=None,
+            llm=llm,
+            memory=object(),
+            skills_root=skills_root,
+            workdir_root=workdir_root,
+        )
+
+        async def resource_factory() -> tuple[Any, Any]:
+            builder = build_chat_executor_builder(
+                singletons,
+                provider="scripted",
+                model="scripted-v1",
+                risk_policy=ToolRiskPolicy.from_trusted_names({"get_paper_order"}),
+            )
+
+            async def cleanup() -> None:
+                return None
+
+            return builder, cleanup
+
+        driver = InProcessDurableDriver.lazy(
+            runtime.async_session_factory,
+            resource_factory=resource_factory,
+        )
+        runtime.bind_durable_driver(driver)
+        case = load_catalog().by_id(case_id)
+        manager = CaseEnvironmentManager(runtime)
+        manager.require_execution_capabilities(case)
+        environment = await manager.prepare(case, trial_index=0)
+        order_id = environment.resolve_order_alias(f"ord-{case_id.lower()}")
+        llm.order_id = order_id
+        before = environment.before_snapshot or await environment.capture_before()
+        actor = environment.actor("requester")
+        executor = DurableHttpBusinessExecutor(
+            runtime.async_session_factory,
+            base_url="http://run-api",
+            timeout_s=5,
+            client_transport=httpx.ASGITransport(
+                app=create_run_api_app(session_factory=runtime.async_session_factory)
+            ),
+            progress_callback=driver.advance,
+        )
+        context = BusinessExecutionContext(
+            case=case,
+            environment=environment,
+            actor=actor,
+            fault_plans=tuple(
+                FaultPlan(target=item.target, mode=item.mode, payload=dict(item.payload))
+                for item in case.fault_injection
+            ),
+            transport_fault=TransportFaultPlan(),
+            barrier=DeterministicBarrier(),
+            execution_id=f"{case_id.lower()}-production-chain",
+        )
+
+        observation = await executor.execute(context)
+        after = await environment.capture_after()
+        run_id = UUID(observation.run_state["run_ids"][0])
+        async with runtime.async_session_factory() as session:
+            tool_rows = tuple(
+                await session.scalars(
+                    select(RunToolExecution)
+                    .where(RunToolExecution.run_id == run_id)
+                    .order_by(RunToolExecution.started_at, RunToolExecution.id)
+                )
+            )
+            pause = await session.scalar(select(RunPause).where(RunPause.run_id == run_id))
+
+        assert pause is not None
+        pending_calls = pause.continuation_payload["body"]["pending_action"]["pending_tool_calls"]
+        assert [call["name"] for call in pending_calls] == ["cancel_paper_order"]
+        assert json.loads(pending_calls[0]["arguments"])["order_id"] == str(order_id)
+        assert pause.response_payload is not None
+        assert pause.response_payload["approved"] is True
+        assert pause.resolved_at is not None
+
+        assert str(order_id) in observation.transcript[0]["content"]
+        assert "{{order_id:" not in observation.transcript[0]["content"]
+        assert observation.run_state["status"] == "completed"
+        assert observation.run_state["pauses"][0]["pause_type"] == "approval"
+        assert observation.run_state["pauses"][0]["decision"] == "approved"
+        assert [row.tool_name for row in tool_rows] == ["get_paper_order", "get_paper_order"]
+        assert all(row.status == "completed" for row in tool_rows)
+        assert before["orders"]["records"][0]["filled_quantity"] == filled_before
+        assert after["orders"]["records"][0]["status"] == "partially_filled"
+        assert after["orders"]["records"][0]["quantity"] == 1000
+        assert after["orders"]["records"][0]["filled_quantity"] == filled_after
+        assert after["positions"]["records"][0]["quantity"] == filled_after
+        assert after["fills"]["count"] == 1
+        assert after["fills"]["records"][0]["quantity"] == filled_after
+        if case_id == "B7-07":
+            assert before["fills"]["records"] == after["fills"]["records"]
+        else:
+            assert before["fills"]["count"] == 0
+        pending_cancel_rows = [
+            row for row in observation.tool_ledger if row.get("tool_name") == "cancel_paper_order"
+        ]
+        assert len(pending_cancel_rows) == 1
+        assert pending_cancel_rows[0]["status"] == "approval_required"
+        assert pending_cancel_rows[0]["result"] is None
+
+        trial = BusinessTrialResult(
+            case_id=case.case_id,
+            trial_index=0,
+            trial_status="valid",
+            failure_reason=None,
+            observation=observation,
+            database_before_after={"before": before, "after": after},
+            environment_manifest=environment.manifest.to_dict(),
+            duration_ms=1,
+        )
+        structured = await BusinessStructuredEvidenceProvider(
+            versions={"model": "scripted-v1", "sut": "production-chatloop"},
+            semantic_judge=None,
+        ).build(case, trial)
+        evaluated = evaluate_trial(
+            case,
+            observation=structured,
+            policy_registry=PolicyRegistry.default(),
+            policy_as_of=load_catalog().policy_as_of,
+            policy_version=load_catalog().policy_version,
+        )
+
+        assert structured["tools"]["get_paper_order"]["attempt_count"] == 2
+        assert structured["tools"]["cancel_paper_order"]["attempt_count"] == 1
+        assert (
+            structured["tools"]["cancel_paper_order"]["last_call"]["status"] == "approval_required"
+        )
+        assert structured["tools"]["cancel_paper_order"]["last_call"]["result"] is None
+        assert evaluated.trial_status is TrialStatus.VALID
+        assert evaluated.task_pass is False
+        assert evaluated.failure_reason == "assertions_failed"
+        assert evaluated.task_score == 0.0
+        failed_required = {
+            result.assertion_id for result in evaluated.required_results if not result.passed
+        }
+        assert f"{case_id.lower().replace('-', '_')}_cancel_result_status" in failed_required
+        assert f"{case_id.lower().replace('-', '_')}_final_cancelled" in failed_required
+        assert any(
+            violation.policy_id == "TRD-CANCEL-UNFILLED-001" and violation.severity == "C0"
+            for violation in evaluated.violations
+        )
     finally:
         if environment is not None:
             await environment.cleanup()

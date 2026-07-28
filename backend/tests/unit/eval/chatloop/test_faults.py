@@ -177,6 +177,21 @@ def test_fault_target_that_is_not_a_registered_tool_fails_loudly() -> None:
         FaultInjectingHub(inner, [FaultPlan(target="market_data", mode="stale")])
 
 
+def test_generic_fault_hub_rejects_approval_pause_instead_of_treating_it_as_stale() -> None:
+    inner = Mock()
+    inner.schemas_for_llm.return_value = [
+        {"type": "function", "function": {"name": "paper_settlement"}}
+    ]
+    plan = FaultPlan(
+        target="paper_settlement",
+        mode="approval_pause",
+        payload={"order_alias": "ord-b7-09", "fill_quantity": 200},
+    )
+
+    with pytest.raises(ValueError, match="approval_pause.*dedicated runner hook"):
+        FaultInjectingHub(inner, [plan])
+
+
 @pytest.mark.asyncio
 async def test_watchlist_duplicate_add_conflict_passes_through_live_result_unchanged() -> None:
     inner = Mock()

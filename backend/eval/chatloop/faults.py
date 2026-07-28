@@ -10,7 +10,9 @@ from app.agents.schemas import ToolResult
 from app.chatloop.state import ChatLoopState
 from app.services.llm_step import StepToolCall
 
-FaultMode = Literal["timeout", "error", "stale", "conflict"]
+from eval.chatloop.case_schema import validate_approval_pause_fault
+
+FaultMode = Literal["timeout", "error", "stale", "conflict", "approval_pause"]
 
 
 class ToolHubLike(Protocol):
@@ -34,6 +36,8 @@ class FaultPlan:
     def __post_init__(self) -> None:
         if not self.target.strip():
             raise ValueError("fault target must be non-empty")
+        if self.mode == "approval_pause":
+            validate_approval_pause_fault(self.target, self.payload)
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +63,8 @@ class FaultInjectingHub:
     def __init__(self, inner: ToolHubLike, plans: list[FaultPlan]) -> None:
         self._inner = inner
         self._plans = tuple(plans)
+        if any(plan.mode == "approval_pause" for plan in self._plans):
+            raise ValueError("approval_pause requires a dedicated runner hook")
         known_targets = {
             str(function.get("name"))
             for schema in inner.schemas_for_llm()

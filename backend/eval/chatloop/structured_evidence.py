@@ -274,6 +274,8 @@ class BusinessStructuredEvidenceProvider:
                 continue
             if _assertion_evidence_exists(projected, assertion):
                 continue
+            if _is_unexecuted_available_tool_assertion(case, projected, assertion):
+                continue
             if assertion.source == "judge":
                 semantic.append(assertion)
                 continue
@@ -469,14 +471,12 @@ def _project_tools(ledger: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             "name": name,
             "args": arguments,
             "arguments": deepcopy(arguments),
-            "result": deepcopy(row.get("result")),
-            "error": deepcopy(row.get("error")),
             "idempotency_key": deepcopy(row.get("idempotency_key")),
             "fault_injection": deepcopy(row.get("fault_injection")),
-            "status": deepcopy(row.get("status")),
-            "error_code": deepcopy(row.get("error_code")),
-            "error_message": deepcopy(row.get("error_message")),
         }
+        for field_name in ("result", "error", "status", "error_code", "error_message"):
+            if field_name in row:
+                call[field_name] = deepcopy(row[field_name])
         calls.append(call)
         names.append(name)
         grouped.setdefault(name, []).append(call)
@@ -515,6 +515,79 @@ def _project_tools(ledger: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
 
 
 _MISSING = object()
+
+
+def _is_unexecuted_available_tool_assertion(
+    case: ConversationCase,
+    projected: Mapping[str, Any],
+    assertion: AssertionSpec,
+) -> bool:
+    """Treat a provably unexecuted available tool as valid negative evidence.
+
+    A missing nested result remains invalid for a completed call. Total absence,
+    an approval-pending call with an explicit null result, or a fully described
+    failed/cancelled/timeout call is instead observed negative evidence that
+    outcome assertions need to score as a task failure.
+    """
+    if assertion.source != "tools" or not assertion.path:
+        return False
+    segments = assertion.path.split(".")
+    if any(not segment for segment in segments) or len(segments) < 2:
+        return False
+    tool_name, tail = segments[0], segments[1:]
+    if not _is_supported_per_tool_path(tail):
+        return False
+    tools = projected.get("tools")
+    if tool_name not in case.available_tools or not isinstance(tools, Mapping):
+        return False
+    tool = tools.get(tool_name)
+    if tool is None:
+        return True
+    if not isinstance(tool, Mapping):
+        return False
+
+    call, call_tail, provably_absent = _resolve_asserted_tool_call(tool, tail)
+    if provably_absent:
+        return True
+    if call is _MISSING:
+        return False
+    if not isinstance(call, Mapping) or call_tail[:1] != ["result"]:
+        return False
+    if call.get("status") == "approval_required":
+        return "result" in call and call["result"] is None
+    if call.get("status") not in {"failed", "cancelled", "timeout"}:
+        return False
+    return (
+        "result" in call
+        and call["result"] is None
+        and all(field_name in call for field_name in ("error", "error_code", "error_message"))
+        and any(call[field_name] for field_name in ("error", "error_code", "error_message"))
+    )
+
+
+def _is_supported_per_tool_path(tail: list[str]) -> bool:
+    if tail == ["attempt_count"]:
+        return True
+    if len(tail) >= 2 and tail[0] == "last_call":
+        return True
+    return len(tail) >= 3 and tail[0] == "calls" and tail[1].isdigit()
+
+
+def _resolve_asserted_tool_call(
+    tool: Mapping[str, Any],
+    tail: list[str],
+) -> tuple[Any, list[str], bool]:
+    if tail[0] == "last_call":
+        return tool.get("last_call", _MISSING), tail[1:], False
+    if tail[0] != "calls" or len(tail) < 3 or not tail[1].isdigit():
+        return _MISSING, [], False
+    calls = tool.get("calls")
+    if not isinstance(calls, Sequence) or isinstance(calls, (str, bytes, bytearray)):
+        return _MISSING, [], False
+    index = int(tail[1])
+    if index >= len(calls):
+        return _MISSING, tail[2:], True
+    return calls[index], tail[2:], False
 
 
 def _resolve_path(root: Any, path: str) -> Any:

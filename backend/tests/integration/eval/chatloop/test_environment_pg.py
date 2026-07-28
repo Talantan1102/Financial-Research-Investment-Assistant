@@ -13,7 +13,7 @@ from app.models.investor_suitability import (
     MarketEntitlement,
 )
 from app.models.paper_account import PaperAccount
-from app.models.paper_order import PaperOrder
+from app.models.paper_order import PaperFill, PaperOrder
 from app.models.run import Run, RunEvent, RunMessage, RunSession
 from app.models.run_scheduling import RunOutbox, RunTenantScheduling
 from app.models.user import User
@@ -21,6 +21,7 @@ from app.models.watchlist import WatchlistAudit
 from app.services.run_service import CreateRunCommand, RunService
 from app.services.trace_models import MCPToolCallLog
 from eval.chatloop.case_loader import load_catalog
+from eval.chatloop.case_schema import ActorSpec
 from eval.chatloop.environment import CaseEnvironmentManager, EvalActor
 from eval.chatloop.scenario import Scenario
 from eval.chatloop.sut_runner import DurableRunHttpTransport, SqlOutcomeCollector
@@ -514,6 +515,119 @@ async def test_partial_order_seed_uses_real_settlement_and_fee_reservation(
     assert entitlement.rule_version == rule.rule_version
 
     await env.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_b7_order_alias_resolves_to_real_uuid_and_pause_fill_is_real_settlement(
+    environment_manager,
+    disposable_eval_async_session_factory,
+) -> None:
+    env = await environment_manager.prepare(_case("B7-09"), trial_index=0)
+    order_id = UUID(env.manifest.order_aliases["ord-b7-09"])
+    initial_trade_count = len(env.manifest.trade_ids)
+
+    assert str(order_id) != "ord-b7-09"
+    assert env.manifest.order_alias_owners["ord-b7-09"] == str(env.actor("requester").user_id)
+    requester_user_id = env.actor("requester").user_id
+    assert requester_user_id is not None
+    before = await env.snapshot()
+    assert before["orders"]["records"][0]["id"] == str(order_id)
+    assert before["orders"]["records"][0]["filled_quantity"] == 0
+
+    await env.apply_order_fill(
+        order_alias="ord-b7-09",
+        quantity=200,
+        expected_user_id=requester_user_id,
+        requester_user_id=requester_user_id,
+    )
+    after = await env.snapshot()
+
+    assert after["orders"]["records"][0]["status"] == "partially_filled"
+    assert after["orders"]["records"][0]["filled_quantity"] == 200
+    assert after["fills"]["count"] == 1
+    assert after["fills"]["records"][0]["quantity"] == 200
+    assert after["positions"]["records"][0]["quantity"] == 200
+    assert len(env.manifest.fill_ids) == 1
+    assert len(env.manifest.match_pass_ids) == 1
+    assert len(env.manifest.trade_ids) == initial_trade_count + 1
+
+    async with disposable_eval_async_session_factory() as session:
+        order = await session.get(PaperOrder, order_id)
+    assert order is not None
+    assert order.filled_quantity == 200
+
+    await env.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_b7_apply_order_fill_rejects_cross_user_even_if_manifest_owner_is_forged(
+    environment_manager,
+    disposable_eval_async_session_factory,
+) -> None:
+    env = await environment_manager.prepare(_case("B7-16"), trial_index=0)
+    alias = "ord-b7-16-owner"
+    order_id = UUID(env.manifest.order_aliases[alias])
+    owner_user_id = env.actor("owner").user_id
+    requester_user_id = env.actor("requester").user_id
+    assert owner_user_id is not None
+    assert requester_user_id is not None
+    assert owner_user_id != requester_user_id
+    assert env.manifest.order_alias_owners[alias] == str(owner_user_id)
+
+    with pytest.raises(PermissionError, match="expected owner and requester"):
+        await env.apply_order_fill(
+            order_alias=alias,
+            quantity=200,
+            expected_user_id=owner_user_id,
+            requester_user_id=requester_user_id,
+        )
+
+    env.manifest.order_alias_owners[alias] = str(requester_user_id)
+    with pytest.raises(PermissionError, match="database owner"):
+        await env.apply_order_fill(
+            order_alias=alias,
+            quantity=200,
+            expected_user_id=requester_user_id,
+            requester_user_id=requester_user_id,
+        )
+
+    async with disposable_eval_async_session_factory() as session:
+        order = await session.get(PaperOrder, order_id)
+        fill_count = await session.scalar(
+            select(func.count()).select_from(PaperFill).where(PaperFill.order_id == order_id)
+        )
+    assert order is not None
+    assert order.user_id == owner_user_id
+    assert order.filled_quantity == 0
+    assert fill_count == 0
+
+    await env.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_seed_order_aliases_are_globally_unique_and_cannot_be_overwritten(
+    environment_manager,
+) -> None:
+    base = _case("B7-09")
+    duplicate = dict(base.initial_state.business_state["orders"]["records"][0])
+    duplicate["order_id"] = "ord-duplicate"
+    business_state = dict(base.initial_state.business_state)
+    business_state["orders"] = {
+        "records": [dict(duplicate)],
+        "by_user": {"other_user": [dict(duplicate)]},
+    }
+    actors = dict(base.initial_state.actors)
+    actors["other_user"] = ActorSpec(role="other_user", tenant_scope="same")
+    case = base.model_copy(
+        update={
+            "initial_state": base.initial_state.model_copy(
+                update={"actors": actors, "business_state": business_state}
+            )
+        }
+    )
+
+    with pytest.raises(ValueError, match="duplicate order alias.*ord-duplicate"):
+        await environment_manager.prepare(case, trial_index=0)
 
 
 @pytest.mark.asyncio

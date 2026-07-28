@@ -16,6 +16,7 @@ k>1:同 case 跑 k 次(独立 request_id),供 pass^k。
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from collections.abc import Awaitable, Callable
@@ -113,6 +114,7 @@ class DurableRunHttpTransport:
         batch_id: str | None = None,
         client_transport: Any | None = None,
         progress_callback: Callable[[], Awaitable[Any]] | None = None,
+        approval_pause_callback: Callable[[str, Any], Awaitable[None]] | None = None,
     ) -> None:
         if actor is None:
             required = {
@@ -161,6 +163,7 @@ class DurableRunHttpTransport:
         self._actor = actor
         self._client_transport = client_transport
         self._progress_callback = progress_callback
+        self._approval_pause_callback = approval_pause_callback
 
     @property
     def actor(self) -> EvalActor | None:
@@ -288,6 +291,16 @@ class DurableRunHttpTransport:
                     if pause.pause_type == "input":
                         resume_response: dict[str, Any] = {"text": reply}
                     elif pause.pause_type == "approval":
+                        if self._approval_pause_callback is not None:
+                            try:
+                                await asyncio.wait_for(
+                                    self._approval_pause_callback(run_id, pause),
+                                    timeout=self._timeout_s,
+                                )
+                            except TimeoutError as exc:
+                                raise TimeoutError(
+                                    f"eval Run {run_id} approval-pause callback timed out"
+                                ) from exc
                         resume_response = {
                             "approved": _approval_from_message(reply),
                             "text": reply,

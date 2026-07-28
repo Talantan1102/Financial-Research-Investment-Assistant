@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from enum import StrEnum
 from typing import Any, Literal
 
@@ -18,7 +19,40 @@ __all__ = [
     "GraderSpec",
     "ScoreComponent",
     "SuiteType",
+    "validate_approval_pause_fault",
+    "validate_order_alias",
 ]
+
+
+_ORDER_ALIAS_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+
+
+def validate_order_alias(value: Any) -> str:
+    if type(value) is not str or _ORDER_ALIAS_PATTERN.fullmatch(value) is None:
+        raise ValueError(
+            "order alias must be 1-64 ASCII letters, digits, dots, underscores, or hyphens"
+        )
+    return value
+
+
+def validate_approval_pause_fault(
+    target: Any,
+    payload: Any,
+) -> tuple[str, int]:
+    if target != "paper_settlement":
+        raise ValueError("approval_pause target must be paper_settlement")
+    if type(payload) is not dict or set(payload) != {"order_alias", "fill_quantity"}:
+        raise ValueError(
+            "approval_pause payload must contain exactly order_alias and fill_quantity"
+        )
+    try:
+        alias = validate_order_alias(payload["order_alias"])
+    except ValueError as exc:
+        raise ValueError(f"approval_pause {exc}") from exc
+    quantity = payload["fill_quantity"]
+    if type(quantity) is not int or quantity <= 0:
+        raise ValueError("approval_pause fill_quantity must be a positive strict integer")
+    return alias, quantity
 
 
 class _StrictModel(BaseModel):
@@ -79,10 +113,21 @@ class FaultSpec(_StrictModel):
     """A controlled fault injected only by evaluation infrastructure."""
 
     target: str = Field(description="需要注入故障的工具、服务或传输目标")
-    mode: Literal["timeout", "error", "stale", "conflict", "response_lost_after_commit"] = Field(
-        description="评估环境注入的故障模式"
-    )
+    mode: Literal[
+        "timeout",
+        "error",
+        "stale",
+        "conflict",
+        "approval_pause",
+        "response_lost_after_commit",
+    ] = Field(description="评估环境注入的故障模式")
     payload: dict[str, Any] = Field(default_factory=dict, description="故障模式所需的附加参数")
+
+    @model_validator(mode="after")
+    def validate_approval_pause(self) -> FaultSpec:
+        if self.mode == "approval_pause":
+            validate_approval_pause_fault(self.target, self.payload)
+        return self
 
 
 class GraderSpec(_StrictModel):
@@ -238,4 +283,15 @@ class ConversationCase(_StrictModel):
                         f"but {assertion_id!r} uses source={source!r} "
                         f"with grader={grader.type!r}"
                     )
+        return self
+
+    @model_validator(mode="after")
+    def validate_approval_pause_case_scope(self) -> ConversationCase:
+        approval_pauses = [
+            fault for fault in self.fault_injection if fault.mode == "approval_pause"
+        ]
+        if len(approval_pauses) > 1:
+            raise ValueError("at most one approval_pause fault is allowed per case")
+        if approval_pauses and self.initial_state.execution_mode != "durable":
+            raise ValueError("approval_pause requires execution_mode=durable")
         return self

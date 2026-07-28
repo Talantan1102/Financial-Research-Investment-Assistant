@@ -15,8 +15,10 @@ from app.chatloop.gates import GateConfig
 from app.chatloop.worker_wiring import HeavySingletons, build_turn_components
 from app.mcp_server.server import build_server
 from eval.chatloop.case_loader import CaseCatalog, CaseCatalogError, load_catalog
-from eval.chatloop.case_schema import AssertionSpec, SuiteType
+from eval.chatloop.case_schema import AssertionSpec, ConversationCase, FaultSpec, SuiteType
+from eval.chatloop.faults import FaultPlan
 from eval.chatloop.policy_registry import PolicyRegistry, score_cap
+from pydantic import ValidationError
 
 EXPECTED = {1: 22, 2: 14, 3: 10, 4: 15, 5: 12, 6: 18, 7: 17, 8: 12}
 APPROVED_SCORE_VECTORS = {
@@ -527,6 +529,211 @@ def test_b6_06_uses_real_permission_chain_and_durable_observation_paths(
         and item.expected == 0
         for item in assertions
     )
+
+
+@pytest.mark.parametrize(
+    ("case_id", "expected_sequence", "expected_fill"),
+    (
+        (
+            "B7-07",
+            ["get_paper_order", "cancel_paper_order", "get_paper_order"],
+            300,
+        ),
+        (
+            "B7-09",
+            ["get_paper_order", "cancel_paper_order", "get_paper_order"],
+            200,
+        ),
+    ),
+)
+def test_b7_cancel_cases_use_only_production_tools_and_real_evidence_paths(
+    catalog: CaseCatalog,
+    production_chat_tools: frozenset[str],
+    case_id: str,
+    expected_sequence: list[str],
+    expected_fill: int,
+) -> None:
+    case = catalog.by_id(case_id)
+    assertions = _all_assertions(case)
+    paths = {item.path for item in assertions}
+
+    assert set(case.available_tools) == {"get_paper_order", "cancel_paper_order"}
+    assert set(case.available_tools) <= production_chat_tools
+    assert "{{order_id:" in case.user_messages[0]
+    assert any(
+        item.source == "tools"
+        and item.operator == "ordered_subsequence"
+        and item.path == "called"
+        and item.expected == expected_sequence
+        for item in assertions
+    )
+    assert any(
+        item.source == "database"
+        and item.path == "after.orders.records.0.filled_quantity"
+        and item.expected == expected_fill
+        for item in assertions
+    )
+    assert any(
+        item.source == "run"
+        and item.operator == "count_equals"
+        and item.path == "pauses"
+        and item.expected == 1
+        for item in assertions
+    )
+    assert not paths & {
+        "pause_count",
+        "timeline.events",
+        "accounting.trade_amount",
+        "accounting.released_amount",
+        "accounting.available_cash_delta",
+        "accounting.frozen_cash_delta",
+        "accounting.trade_ledger_total",
+        "after.cash.release_events",
+        "after.orders.records.0.cancelled_qty",
+        "after.orders.records.0.remaining_qty",
+        "after.positions.by_symbol.000001.total_qty",
+    }
+
+    if case_id == "B7-09":
+        assert [(item.target, item.mode, item.payload) for item in case.fault_injection] == [
+            (
+                "paper_settlement",
+                "approval_pause",
+                {"order_alias": "ord-b7-09", "fill_quantity": 200},
+            )
+        ]
+
+
+@pytest.mark.parametrize(
+    ("case_id", "alias", "initial_filled", "expected_filled", "initial_frozen"),
+    (
+        ("B7-07", "ord-b7-07", 300, 300, 7840.08),
+        ("B7-09", "ord-b7-09", 0, 200, 11205.11),
+    ),
+)
+def test_b7_cancel_catalog_state_uses_real_snapshot_field_names(
+    catalog: CaseCatalog,
+    case_id: str,
+    alias: str,
+    initial_filled: int,
+    expected_filled: int,
+    initial_frozen: float,
+) -> None:
+    case = catalog.by_id(case_id)
+    state = case.initial_state.business_state
+    facts = case.hidden_facts
+
+    assert state["orders"] == {
+        "count": 1,
+        "records": [
+            {
+                "order_id": alias,
+                "ts_code": "000001.SZ",
+                "side": "buy",
+                "order_type": "limit",
+                "quantity": 1000,
+                "filled_quantity": initial_filled,
+                "status": "partially_filled" if initial_filled else "open",
+                "limit_price": 11.2,
+            }
+        ],
+    }
+    assert state["fills"] == {
+        "count": 1 if initial_filled else 0,
+        "records": ([{"quantity": initial_filled}] if initial_filled else []),
+    }
+    assert state["positions"] == {
+        "records": (
+            [{"ts_code": "000001.SZ", "quantity": initial_filled}] if initial_filled else []
+        )
+    }
+    assert state["funds"] == {"frozen_cash": initial_frozen}
+    assert facts == {
+        "orders": {
+            "records": [
+                {
+                    "status": "cancelled",
+                    "quantity": 1000,
+                    "filled_quantity": expected_filled,
+                }
+            ]
+        },
+        "fills": {"records": [{"quantity": expected_filled}]},
+        "positions": {"records": [{"ts_code": "000001.SZ", "quantity": expected_filled}]},
+        "funds": {"frozen_cash": 0.0},
+    }
+
+    legacy_keys = {
+        "accounting",
+        "available_cash_delta",
+        "by_symbol",
+        "cancelled_qty",
+        "cash",
+        "filled_qty",
+        "final_cancelled_qty",
+        "frozen_amount",
+        "frozen_cash_delta",
+        "order_qty",
+        "release_events",
+        "released_amount",
+        "remaining_qty",
+        "total_qty",
+        "trade_amount",
+        "trade_ledger_total",
+        "unfilled_qty",
+    }
+    nested_keys: set[str] = set()
+    pending: list[object] = [state, facts]
+    while pending:
+        value = pending.pop()
+        if isinstance(value, dict):
+            nested_keys.update(str(key) for key in value)
+            pending.extend(value.values())
+        elif isinstance(value, list):
+            pending.extend(value)
+    assert not nested_keys & legacy_keys
+
+
+@pytest.mark.parametrize(
+    ("target", "payload"),
+    (
+        ("cancel_paper_order", {"order_alias": "ord-b7-09", "fill_quantity": 200}),
+        ("paper_settlement", {"fill_quantity": 200}),
+        ("paper_settlement", {"order_alias": "ord-b7-09"}),
+        (
+            "paper_settlement",
+            {"order_alias": "ord-b7-09", "fill_quantity": 200, "extra": True},
+        ),
+        ("paper_settlement", {"order_alias": "", "fill_quantity": 200}),
+        ("paper_settlement", {"order_alias": "bad alias", "fill_quantity": 200}),
+        ("paper_settlement", {"order_alias": "x" * 65, "fill_quantity": 200}),
+        ("paper_settlement", {"order_alias": "ord-b7-09", "fill_quantity": True}),
+        ("paper_settlement", {"order_alias": "ord-b7-09", "fill_quantity": 200.0}),
+        ("paper_settlement", {"order_alias": "ord-b7-09", "fill_quantity": "200"}),
+        ("paper_settlement", {"order_alias": "ord-b7-09", "fill_quantity": 0}),
+        ("paper_settlement", {"order_alias": "ord-b7-09", "fill_quantity": -1}),
+    ),
+)
+def test_approval_pause_schema_and_runtime_plan_reject_invalid_config(
+    target: str,
+    payload: dict[str, object],
+) -> None:
+    with pytest.raises((ValidationError, ValueError), match="approval_pause"):
+        FaultSpec.model_validate({"target": target, "mode": "approval_pause", "payload": payload})
+    with pytest.raises(ValueError, match="approval_pause"):
+        FaultPlan(target=target, mode="approval_pause", payload=payload)
+
+
+def test_approval_pause_requires_durable_case_and_is_unique(catalog: CaseCatalog) -> None:
+    raw = catalog.by_id("B7-09").model_dump(mode="python")
+    raw["initial_state"]["execution_mode"] = "direct"
+    with pytest.raises(ValidationError, match="approval_pause.*durable"):
+        ConversationCase.model_validate(raw)
+
+    raw = catalog.by_id("B7-09").model_dump(mode="python")
+    raw["fault_injection"] = [*raw["fault_injection"], *raw["fault_injection"]]
+    with pytest.raises(ValidationError, match="at most one approval_pause"):
+        ConversationCase.model_validate(raw)
 
 
 def test_b6_06_does_not_score_environment_constant_permission_link_count(

@@ -5,12 +5,18 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal, Protocol
+from uuid import UUID
 
-from eval.chatloop.case_schema import ConversationCase
+from eval.chatloop.case_schema import (
+    ConversationCase,
+    validate_approval_pause_fault,
+    validate_order_alias,
+)
 from eval.chatloop.environment import EvalActor, TrialEnvironment
 from eval.chatloop.faults import (
     DeterministicBarrier,
@@ -174,6 +180,8 @@ class DurableHttpBusinessExecutor:
     async def execute(self, context: BusinessExecutionContext) -> BusinessObservation:
         from eval.chatloop.sut_runner import DurableRunHttpTransport
 
+        pause_callback = _approval_pause_callback(context)
+
         transport = DurableRunHttpTransport(
             self._session_factory,
             actor=context.actor,
@@ -183,10 +191,16 @@ class DurableHttpBusinessExecutor:
             batch_id=context.execution_id,
             client_transport=self._client_transport,
             progress_callback=self._progress_callback,
+            approval_pause_callback=pause_callback,
         )
         observed = await transport.execute_messages(
             case_id=context.case.case_id,
-            messages=list(context.case.user_messages),
+            messages=_render_environment_messages(
+                context.case.user_messages,
+                context.environment.manifest.order_aliases,
+                order_alias_owners=context.environment.manifest.order_alias_owners,
+                requester_user_id=context.actor.user_id,
+            ),
             run_idx=context.environment.trial_index,
             response_lost_after_commit=(context.transport_fault.response_lost_after_commit),
         )
@@ -219,6 +233,103 @@ class DurableHttpBusinessExecutor:
             cost_cny=observed.cost_cny,
             total_tokens=observed.total_tokens,
         )
+
+
+_ORDER_ID_PLACEHOLDER = re.compile(r"\{\{order_id:([A-Za-z0-9][A-Za-z0-9._-]{0,63})\}\}")
+
+
+def _render_environment_messages(
+    messages: list[str],
+    order_aliases: dict[str, str],
+    *,
+    order_alias_owners: dict[str, str],
+    requester_user_id: UUID | None,
+) -> list[str]:
+    """Replace catalog aliases only after the isolated order rows exist."""
+
+    def replace(match: re.Match[str]) -> str:
+        alias = validate_order_alias(match.group(1))
+        try:
+            raw_order_id = order_aliases[alias]
+        except KeyError as exc:
+            raise KeyError(f"unknown order placeholder alias {alias!r}") from exc
+        try:
+            raw_owner = order_alias_owners[alias]
+        except KeyError as exc:
+            raise ValueError(f"order alias {alias!r} is missing owner") from exc
+        if requester_user_id is None:
+            raise PermissionError(f"order alias {alias!r} has no authenticated requester")
+        try:
+            owner_user_id = UUID(raw_owner)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"order alias {alias!r} has invalid owner UUID") from exc
+        if owner_user_id != requester_user_id:
+            raise PermissionError(f"order alias {alias!r} does not belong to requester")
+        try:
+            return str(UUID(raw_order_id))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"invalid UUID for order alias {alias!r}") from exc
+
+    rendered = [_ORDER_ID_PLACEHOLDER.sub(replace, message) for message in messages]
+    if any("{{order_id" in message for message in rendered):
+        raise ValueError("malformed order placeholder")
+    return rendered
+
+
+def _approval_pause_callback(
+    context: BusinessExecutionContext,
+) -> Callable[[str, Any], Awaitable[None]] | None:
+    plans = [plan for plan in context.fault_plans if plan.mode == "approval_pause"]
+    if not plans:
+        return None
+    if context.case.initial_state.execution_mode != "durable":
+        raise ValueError("approval_pause requires execution_mode=durable")
+    if len(plans) != 1:
+        raise ValueError("durable eval supports at most one approval_pause plan")
+    plan = plans[0]
+    alias, quantity = validate_approval_pause_fault(plan.target, plan.payload)
+    requester_user_id = context.actor.user_id
+    if requester_user_id is None:
+        raise PermissionError("approval_pause requires an authenticated requester")
+    try:
+        raw_owner_user_id = context.environment.manifest.order_alias_owners[alias]
+    except KeyError as exc:
+        raise ValueError(f"order alias {alias!r} is missing owner") from exc
+    try:
+        expected_user_id = UUID(raw_owner_user_id)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"order alias {alias!r} has invalid owner UUID") from exc
+    if expected_user_id != requester_user_id:
+        raise PermissionError(f"order alias {alias!r} does not belong to approval requester")
+    expected_order_id = context.environment.resolve_order_alias(alias)
+    applied = False
+
+    async def apply(_run_id: str, pause: Any) -> None:
+        nonlocal applied
+        if applied:
+            raise RuntimeError("approval-pause settlement hook was invoked more than once")
+        paused_calls = pause.request_payload.get("tool_calls", [])
+        cancel_calls = [
+            call
+            for call in paused_calls
+            if isinstance(call, dict) and call.get("name") == "cancel_paper_order"
+        ]
+        if len(cancel_calls) != 1:
+            raise RuntimeError("settlement hook requires exactly one paused cancel_paper_order")
+        arguments = cancel_calls[0].get("arguments", {})
+        if isinstance(arguments, str):
+            arguments = json.loads(arguments)
+        if str(arguments.get("order_id")) != str(expected_order_id):
+            raise RuntimeError("paused cancel_paper_order does not target the seeded order")
+        await context.environment.apply_order_fill(
+            order_alias=alias,
+            quantity=quantity,
+            expected_user_id=expected_user_id,
+            requester_user_id=requester_user_id,
+        )
+        applied = True
+
+    return apply
 
 
 class DirectToolLoopBusinessExecutor:
@@ -405,15 +516,25 @@ def extract_business_tool_ledger(
             content = responses.get(call_id)
             result: Any = None
             error: str | None = None
+            status: str | None = None
+            error_code: str | None = None
+            error_message: str | None = None
             if content is None:
                 error = "missing tool response"
-            elif isinstance(content, str) and content.startswith("[ERROR]"):
+            elif not isinstance(content, str):
+                error = "tool response has invalid structure"
+            elif content.startswith("[ERROR]"):
                 error = content.removeprefix("[ERROR]").strip() or "unknown tool error"
+                status = "failed"
+                error_code = "tool_error"
+                error_message = error
             else:
                 try:
-                    result = json.loads(content) if isinstance(content, str) else content
+                    result = json.loads(content)
                 except json.JSONDecodeError:
                     error = "tool response is not valid JSON"
+                else:
+                    status = "completed"
             row = {
                 "tool_name": name,
                 "arguments": arguments,
@@ -421,6 +542,14 @@ def extract_business_tool_ledger(
                 "error": error,
                 "idempotency_key": call_id,
             }
+            if status is not None:
+                row.update(
+                    {
+                        "status": status,
+                        "error_code": error_code,
+                        "error_message": error_message,
+                    }
+                )
             plan = next((item for item in fault_plans if item.target == name), None)
             if plan is not None:
                 row["fault_injection"] = {

@@ -1,8 +1,181 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+from uuid import UUID
+
+import pytest
 from app.chatloop.state import ChatLoopState
-from eval.chatloop.business_runner import extract_business_tool_ledger
+from eval.chatloop.business_runner import (
+    _approval_pause_callback,
+    _render_environment_messages,
+    extract_business_tool_ledger,
+)
 from eval.chatloop.faults import FaultPlan
+
+
+def test_approval_pause_execution_guard_rejects_direct_case() -> None:
+    context = SimpleNamespace(
+        case=SimpleNamespace(initial_state=SimpleNamespace(execution_mode="direct")),
+        fault_plans=(
+            FaultPlan(
+                target="paper_settlement",
+                mode="approval_pause",
+                payload={"order_alias": "ord-b7-09", "fill_quantity": 200},
+            ),
+        ),
+        environment=SimpleNamespace(),
+    )
+
+    with pytest.raises(ValueError, match="approval_pause.*durable"):
+        _approval_pause_callback(context)
+
+
+@pytest.mark.parametrize(
+    ("target", "payload"),
+    (
+        (
+            "cancel_paper_order",
+            {"order_alias": "ord-b7-09", "fill_quantity": 200},
+        ),
+        ("paper_settlement", {"order_alias": "ord-b7-09", "fill_quantity": True}),
+        ("paper_settlement", {"order_alias": "bad alias", "fill_quantity": 200}),
+        (
+            "paper_settlement",
+            {"order_alias": "ord-b7-09", "fill_quantity": 200, "extra": True},
+        ),
+    ),
+)
+def test_approval_pause_execution_guard_revalidates_plan(
+    target: str,
+    payload: dict[str, object],
+) -> None:
+    context = SimpleNamespace(
+        case=SimpleNamespace(initial_state=SimpleNamespace(execution_mode="durable")),
+        fault_plans=(SimpleNamespace(target=target, mode="approval_pause", payload=payload),),
+        environment=SimpleNamespace(),
+    )
+
+    with pytest.raises(ValueError, match="approval_pause"):
+        _approval_pause_callback(context)
+
+
+def test_approval_pause_execution_guard_rejects_multiple_plans() -> None:
+    plan = FaultPlan(
+        target="paper_settlement",
+        mode="approval_pause",
+        payload={"order_alias": "ord-b7-09", "fill_quantity": 200},
+    )
+    context = SimpleNamespace(
+        case=SimpleNamespace(initial_state=SimpleNamespace(execution_mode="durable")),
+        fault_plans=(plan, plan),
+        environment=SimpleNamespace(),
+    )
+
+    with pytest.raises(ValueError, match="at most one approval_pause"):
+        _approval_pause_callback(context)
+
+
+def test_approval_pause_callback_rejects_cross_user_order_alias() -> None:
+    owner_user_id = UUID("00000000-0000-4000-8000-000000000001")
+    requester_user_id = UUID("00000000-0000-4000-8000-000000000002")
+    plan = FaultPlan(
+        target="paper_settlement",
+        mode="approval_pause",
+        payload={"order_alias": "ord-b7-owner", "fill_quantity": 200},
+    )
+    context = SimpleNamespace(
+        case=SimpleNamespace(initial_state=SimpleNamespace(execution_mode="durable")),
+        fault_plans=(plan,),
+        actor=SimpleNamespace(user_id=requester_user_id),
+        environment=SimpleNamespace(
+            manifest=SimpleNamespace(order_alias_owners={"ord-b7-owner": str(owner_user_id)}),
+            resolve_order_alias=lambda _alias: UUID("00000000-0000-4000-8000-00000000b716"),
+        ),
+    )
+
+    with pytest.raises(PermissionError, match="order alias.*approval requester"):
+        _approval_pause_callback(context)
+
+
+@pytest.mark.parametrize(
+    "message",
+    (
+        "撤销 {{order_id:}}",
+        "撤销 {{order_id:ord-b7-09",
+        "撤销 {{order_id:bad alias}}",
+    ),
+)
+def test_order_placeholder_rejects_empty_unclosed_or_invalid_format(message: str) -> None:
+    requester = UUID("00000000-0000-4000-8000-000000000001")
+
+    with pytest.raises(ValueError, match="malformed order placeholder"):
+        _render_environment_messages(
+            [message],
+            {},
+            order_alias_owners={},
+            requester_user_id=requester,
+        )
+
+
+def test_order_placeholder_rejects_unknown_alias() -> None:
+    requester = UUID("00000000-0000-4000-8000-000000000001")
+
+    with pytest.raises(KeyError, match="unknown order placeholder alias"):
+        _render_environment_messages(
+            ["撤销 {{order_id:ord-missing}}"],
+            {},
+            order_alias_owners={},
+            requester_user_id=requester,
+        )
+
+
+def test_order_placeholder_rejects_non_uuid_seed_value() -> None:
+    requester = UUID("00000000-0000-4000-8000-000000000001")
+
+    with pytest.raises(ValueError, match="invalid UUID"):
+        _render_environment_messages(
+            ["撤销 {{order_id:ord-b7-09}}"],
+            {"ord-b7-09": "not-a-uuid"},
+            order_alias_owners={"ord-b7-09": str(requester)},
+            requester_user_id=requester,
+        )
+
+
+def test_order_placeholder_rejects_missing_or_cross_user_owner() -> None:
+    requester = UUID("00000000-0000-4000-8000-000000000001")
+    other_user = UUID("00000000-0000-4000-8000-000000000002")
+    order_id = "00000000-0000-4000-8000-00000000b709"
+
+    with pytest.raises(ValueError, match="missing owner"):
+        _render_environment_messages(
+            ["撤销 {{order_id:ord-b7-09}}"],
+            {"ord-b7-09": order_id},
+            order_alias_owners={},
+            requester_user_id=requester,
+        )
+    with pytest.raises(PermissionError, match="does not belong to requester"):
+        _render_environment_messages(
+            ["撤销 {{order_id:ord-b7-09}}"],
+            {"ord-b7-09": order_id},
+            order_alias_owners={"ord-b7-09": str(other_user)},
+            requester_user_id=requester,
+        )
+
+
+def test_order_placeholder_renders_multiple_owned_templates() -> None:
+    requester = UUID("00000000-0000-4000-8000-000000000001")
+    first_id = "00000000-0000-4000-8000-00000000b707"
+    second_id = "00000000-0000-4000-8000-00000000b709"
+
+    rendered = _render_environment_messages(
+        ["比较 {{order_id:ord-b7-07}} 和 {{order_id:ord-b7-09}}"],
+        {"ord-b7-07": first_id, "ord-b7-09": second_id},
+        order_alias_owners={"ord-b7-07": str(requester), "ord-b7-09": str(requester)},
+        requester_user_id=requester,
+    )
+
+    assert rendered == [f"比较 {first_id} 和 {second_id}"]
+    assert "{{order_id" not in rendered[0]
 
 
 def test_extract_tool_ledger_keeps_arguments_results_errors_and_call_ids() -> None:
@@ -54,6 +227,9 @@ def test_extract_tool_ledger_keeps_arguments_results_errors_and_call_ids() -> No
             "arguments": {"ts_code": "000001.SZ"},
             "result": {"price": 10.2},
             "error": None,
+            "status": "completed",
+            "error_code": None,
+            "error_message": None,
             "idempotency_key": "ok-1",
         },
         {
@@ -61,6 +237,9 @@ def test_extract_tool_ledger_keeps_arguments_results_errors_and_call_ids() -> No
             "arguments": {"quantity": 100},
             "result": None,
             "error": "permission denied",
+            "status": "failed",
+            "error_code": "tool_error",
+            "error_message": "permission denied",
             "idempotency_key": "bad-1",
         },
     )
@@ -90,6 +269,7 @@ def test_extract_tool_ledger_marks_missing_response_instead_of_hiding_it() -> No
 
     assert ledger[0]["result"] is None
     assert ledger[0]["error"] == "missing tool response"
+    assert "status" not in ledger[0]
 
 
 def test_extract_tool_ledger_records_eval_fault_provenance_without_changing_tool_output() -> None:

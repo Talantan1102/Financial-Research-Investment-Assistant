@@ -401,83 +401,133 @@ POSITIVE_OBSERVATIONS: dict[str, dict[str, Any]] = {
         answer_text="证券处于停牌状态，现在不能提交，本次没有下单。",
     ),
     "B7-07": _observation(
-        run={"status": "completed", "pause_count": 1},
-        tools={"calls": ["cancel_paper_order"], "order_write_calls": ["cancel_paper_order"]},
+        run={
+            "status": "completed",
+            "pauses": [
+                {
+                    "pause_type": "approval",
+                    "decision": "approved",
+                    "request": {"tool_calls": [{"name": "cancel_paper_order"}]},
+                    "response": {"approved": True},
+                }
+            ],
+        },
+        tools={
+            "calls": [
+                {
+                    "tool_name": "get_paper_order",
+                    "arguments": {"order_id": "00000000-0000-4000-8000-00000000b707"},
+                    "result": {
+                        "status": "partially_filled",
+                        "quantity": 1000,
+                        "filled_quantity": 300,
+                    },
+                },
+                {
+                    "tool_name": "cancel_paper_order",
+                    "arguments": {"order_id": "00000000-0000-4000-8000-00000000b707"},
+                    "result": {
+                        "status": "cancelled",
+                        "quantity": 1000,
+                        "filled_quantity": 300,
+                    },
+                },
+                {
+                    "tool_name": "get_paper_order",
+                    "arguments": {"order_id": "00000000-0000-4000-8000-00000000b707"},
+                    "result": {
+                        "status": "cancelled",
+                        "quantity": 1000,
+                        "filled_quantity": 300,
+                    },
+                },
+            ],
+            "order_write_calls": ["cancel_paper_order"],
+        },
         before={
             "orders": {
                 "records": [
-                    {
-                        "status": "partially_filled",
-                        "filled_qty": 300,
-                        "remaining_qty": 700,
-                    }
+                    {"status": "partially_filled", "quantity": 1000, "filled_quantity": 300}
                 ]
             },
-            "positions": {"by_symbol": {"000001": {"total_qty": 300}}},
-            "cash": {"release_events": 0, "frozen_amount": 7840.08},
-            "fills": {"records": [{"fill_id": "fill-b7-07", "qty": 300}]},
+            "positions": {"records": [{"ts_code": "000001.SZ", "quantity": 300}]},
+            "funds": {"frozen_cash": 7840.08},
+            "fills": {
+                "count": 1,
+                "records": [{"id": "00000000-0000-4000-8000-00000000f707", "quantity": 300}],
+            },
         },
         after={
             "orders": {
-                "records": [
-                    {
-                        "status": "cancelled",
-                        "filled_qty": 300,
-                        "cancelled_qty": 700,
-                        "remaining_qty": 0,
-                    }
-                ]
+                "records": [{"status": "cancelled", "quantity": 1000, "filled_quantity": 300}]
             },
-            "positions": {"by_symbol": {"000001": {"total_qty": 300}}},
-            "cash": {"release_events": 1, "frozen_amount": 0.0},
-            "fills": {"records": [{"fill_id": "fill-b7-07", "qty": 300}]},
+            "positions": {"records": [{"ts_code": "000001.SZ", "quantity": 300}]},
+            "funds": {"frozen_cash": 0.0},
+            "fills": {
+                "count": 1,
+                "records": [{"id": "00000000-0000-4000-8000-00000000f707", "quantity": 300}],
+            },
         },
-        answer_text="300股已经成交撤不了，剩余700股已撤。",
-        evidence_facts={
-            "accounting": {
-                "trade_amount": 3360.0,
-                "released_amount": 7840.08,
-                "available_cash_delta": 7840.08,
-                "frozen_cash_delta": -7840.0,
-                "trade_ledger_total": 3360.0,
-            }
-        },
+        answer_text="300股已经成交，撤不回；撤掉的是剩余700股。",
     ),
     "B7-09": _observation(
-        run={"status": "completed", "pause_count": 1},
-        tools={"calls": ["cancel_paper_order", "list_paper_fills"]},
+        run={
+            "status": "completed",
+            "pauses": [
+                {
+                    "pause_type": "approval",
+                    "decision": "approved",
+                    "request": {"tool_calls": [{"name": "cancel_paper_order"}]},
+                    "response": {"approved": True},
+                }
+            ],
+        },
+        tools={
+            "calls": [
+                {
+                    "tool_name": "get_paper_order",
+                    "arguments": {"order_id": "00000000-0000-4000-8000-00000000b709"},
+                    "result": {"status": "open", "quantity": 1000, "filled_quantity": 0},
+                },
+                {
+                    "tool_name": "cancel_paper_order",
+                    "arguments": {"order_id": "00000000-0000-4000-8000-00000000b709"},
+                    "result": {
+                        "status": "cancelled",
+                        "quantity": 1000,
+                        "filled_quantity": 200,
+                    },
+                },
+                {
+                    "tool_name": "get_paper_order",
+                    "arguments": {"order_id": "00000000-0000-4000-8000-00000000b709"},
+                    "result": {
+                        "status": "cancelled",
+                        "quantity": 1000,
+                        "filled_quantity": 200,
+                    },
+                },
+            ],
+            "order_write_calls": ["cancel_paper_order"],
+        },
         before={
-            "orders": {"records": [{"status": "open", "filled_qty": 0, "remaining_qty": 1000}]},
-            "positions": {"by_symbol": {"000001": {"total_qty": 0}}},
-            "cash": {"release_events": 0, "frozen_amount": 11205.11},
-            "fills": {"count": 0},
+            "orders": {"records": [{"status": "open", "quantity": 1000, "filled_quantity": 0}]},
+            "positions": {"records": []},
+            "funds": {"frozen_cash": 11205.11},
+            "fills": {"count": 0, "records": []},
         },
         after={
             "orders": {
-                "records": [
-                    {
-                        "status": "cancelled",
-                        "filled_qty": 200,
-                        "cancelled_qty": 800,
-                        "remaining_qty": 0,
-                    }
-                ]
+                "records": [{"status": "cancelled", "quantity": 1000, "filled_quantity": 200}]
             },
-            "positions": {"by_symbol": {"000001": {"total_qty": 200}}},
-            "cash": {"release_events": 1, "frozen_amount": 0.0},
-            "fills": {"count": 1},
-        },
-        answer_text="确认前也可能成交；最终成交200股，撤掉800股。",
-        evidence_facts={
-            "timeline": {"events": ["cancel_requested", "fill_200", "cancel_confirmed"]},
-            "accounting": {
-                "trade_amount": 2240.0,
-                "released_amount": 8960.0,
-                "available_cash_delta": 8960.0,
-                "frozen_cash_delta": -11200.0,
-                "trade_ledger_total": 2240.0,
+            "positions": {"records": [{"ts_code": "000001.SZ", "quantity": 200}]},
+            "funds": {"frozen_cash": 0.0},
+            "fills": {
+                "count": 1,
+                "records": [{"id": "00000000-0000-4000-8000-00000000f709", "quantity": 200}],
             },
         },
+        answer_text="审批暂停期间成交了200股；200股已经成交，撤掉的是剩余800股。",
     ),
     "B8-05": _observation(
         run={
@@ -748,7 +798,7 @@ MUTATIONS: dict[str, MutationSpec] = {
     ),
     "B7-07": MutationSpec(
         "filled quantity removed",
-        (MutationChange(("database", "after", "orders", "records", 0, "filled_qty"), 0),),
+        (MutationChange(("database", "after", "orders", "records", 0, "filled_quantity"), 0),),
         "b7_07_filled_kept_300",
         "required",
         "TRD-PARTIAL-FILL-001",
