@@ -13,7 +13,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, cast
 from uuid import UUID, uuid4
@@ -29,6 +29,12 @@ from app.memory.models import (
 )
 from app.memory.retriever import jieba_tokenize_for_search
 from app.models.chat import ChatSession
+from app.models.investor_suitability import (
+    EntitlementStatus,
+    Market,
+    MarketAccessRule,
+    MarketEntitlement,
+)
 from app.models.paper_account import (
     PaperAccount,
     PaperAccountResetAudit,
@@ -58,6 +64,8 @@ from app.models.trade import Trade, TradeType
 from app.models.user import User
 from app.models.watchlist import WatchlistAudit, WatchlistItem
 from app.schemas.paper_trading import OrderDraft
+from app.services.investor_suitability.instruments import classify_market
+from app.services.investor_suitability.rules import rulebook as market_rulebook
 from app.services.paper_trading.account_service import PaperAccountService
 from app.services.paper_trading.clock import FixedTradingCalendar, TradingClock
 from app.services.paper_trading.matcher import Execution, match_visible_depth
@@ -86,6 +94,22 @@ _DEFAULT_SECURITIES = {
     "688981.SH": "中芯国际",
     "920001.BJ": "北证示例",
 }
+_CATALOG_MARKETS = {
+    "main_board": Market.MAIN,
+    "main": Market.MAIN,
+    "gem": Market.CHINEXT,
+    "chi_next": Market.CHINEXT,
+    "chinext": Market.CHINEXT,
+    "star_market": Market.STAR,
+    "star": Market.STAR,
+    "bse": Market.BSE,
+}
+_MARKET_CATALOG_ALIASES = {
+    Market.MAIN: "main_board",
+    Market.CHINEXT: "gem",
+    Market.STAR: "star_market",
+    Market.BSE: "bse",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,6 +135,8 @@ class SeedManifest:
     user_ids: list[str] = field(default_factory=list)
     tenant_memberships: list[dict[str, str]] = field(default_factory=list)
     paper_account_ids: list[str] = field(default_factory=list)
+    market_access_rule_ids: list[str] = field(default_factory=list)
+    market_entitlement_ids: list[str] = field(default_factory=list)
     paper_cash_ledger_ids: list[str] = field(default_factory=list)
     paper_account_reset_audit_ids: list[str] = field(default_factory=list)
     position_ids: list[str] = field(default_factory=list)
@@ -205,6 +231,23 @@ class TrialEnvironment:
                         .order_by(PaperAccount.generation, PaperAccount.id)
                     )
                 ).all()
+            )
+            current_account = accounts[-1] if accounts else None
+            entitlements = (
+                list(
+                    (
+                        await session.scalars(
+                            select(MarketEntitlement)
+                            .where(
+                                MarketEntitlement.account_id == current_account.id,
+                                MarketEntitlement.account_generation == current_account.generation,
+                            )
+                            .order_by(MarketEntitlement.market)
+                        )
+                    ).all()
+                )
+                if current_account is not None
+                else []
             )
             positions = list(
                 (
@@ -357,6 +400,15 @@ class TrialEnvironment:
             {"id": str(row.item_id), "source": row.source, "text": row.text}
             for row in persona_items
         ]
+        entitlement_rows = {
+            _MARKET_CATALOG_ALIASES[cast(Market, row.market)]: {
+                "status": cast(EntitlementStatus, row.status).value,
+                "can_buy": bool(row.can_buy),
+                "can_sell": bool(row.can_sell),
+                "can_subscribe": bool(row.can_subscribe),
+            }
+            for row in entitlements
+        }
         latest = order_rows[-1] if order_rows else None
         primary_account = account_rows[-1] if account_rows else None
         return {
@@ -382,6 +434,8 @@ class TrialEnvironment:
                 "records": memory_rows,
                 "persona": persona_rows,
             },
+            "entitlements": {"by_market": entitlement_rows},
+            "permission_links": {"count": 0},
         }
 
     async def capture_before(self) -> dict[str, Any]:
@@ -690,6 +744,28 @@ class TrialEnvironment:
                 ).all()
             )
             account_ids = [cast(UUID, row.id) for row in accounts]
+            market_entitlements = (
+                list(
+                    (
+                        await session.scalars(
+                            select(MarketEntitlement).where(
+                                MarketEntitlement.account_id.in_(account_ids)
+                            )
+                        )
+                    ).all()
+                )
+                if account_ids
+                else []
+            )
+            market_access_rules = list(
+                (
+                    await session.scalars(
+                        select(MarketAccessRule).where(
+                            MarketAccessRule.rule_version == _eval_rule_version(self.tenant_id)
+                        )
+                    )
+                ).all()
+            )
             holding_lots = (
                 list(
                     (
@@ -838,6 +914,14 @@ class TrialEnvironment:
         )
         _extend_unique(self.manifest.chat_session_ids, (str(row.id) for row in chat_sessions))
         _extend_unique(self.manifest.paper_account_ids, (str(row.id) for row in accounts))
+        _extend_unique(
+            self.manifest.market_entitlement_ids,
+            (str(row.id) for row in market_entitlements),
+        )
+        _extend_unique(
+            self.manifest.market_access_rule_ids,
+            (str(row.id) for row in market_access_rules),
+        )
         _extend_unique(self.manifest.paper_cash_ledger_ids, (str(row.id) for row in ledgers))
         _extend_unique(self.manifest.paper_account_reset_audit_ids, (str(row.id) for row in resets))
         # WatchlistAudit is intentionally append-only and has a RESTRICT user FK.
@@ -1048,6 +1132,18 @@ class TrialEnvironment:
                 self.manifest.paper_cash_ledger_ids,
             )
             await _delete_uuid_rows(
+                session,
+                MarketEntitlement,
+                MarketEntitlement.id,
+                self.manifest.market_entitlement_ids,
+            )
+            await _delete_uuid_rows(
+                session,
+                MarketAccessRule,
+                MarketAccessRule.id,
+                self.manifest.market_access_rule_ids,
+            )
+            await _delete_uuid_rows(
                 session, PaperAccount, PaperAccount.id, self.manifest.paper_account_ids
             )
             for key in self.manifest.tenant_memberships:
@@ -1234,6 +1330,9 @@ class CaseEnvironmentManager:
             await self._seed_watchlists(session, case, state, canonical, manifest)
             await self._seed_positions(session, case, state, canonical, account_by_role, manifest)
             await self._seed_orders(session, state, canonical, account_by_role, manifest)
+            await self._seed_entitlements(
+                session, case, state, canonical, account_by_role, manifest
+            )
             await self._seed_memories(session, case, canonical, manifest)
 
         creator_account = account_by_role.get("creator")
@@ -1371,6 +1470,7 @@ class CaseEnvironmentManager:
                                 "limit_price": str(current_avg_cost),
                             },
                             seed=f"support-lot:{case.case_id}:{current_code}:{lot_index}",
+                            rule_namespace=manifest.tenant_ids[0],
                             now=at,
                         )
                         order_ids.append(str(order.id))
@@ -1490,6 +1590,7 @@ class CaseEnvironmentManager:
                         user_id=current_user_id,
                         spec=current_spec,
                         seed=current_seed,
+                        rule_namespace=manifest.tenant_ids[0],
                     )
                 )
             )
@@ -1497,6 +1598,39 @@ class CaseEnvironmentManager:
             alias = spec.get("order_id")
             if alias:
                 manifest.order_aliases[str(alias)] = str(row.id)
+
+    async def _seed_entitlements(
+        self,
+        session: Any,
+        case: ConversationCase,
+        state: dict[str, Any],
+        actors: dict[str, EvalActor],
+        accounts: dict[str, PaperAccount],
+        manifest: SeedManifest,
+    ) -> None:
+        declared = _declared_entitlements(case, state)
+        if not declared:
+            return
+        account = await _ensure_account(
+            session,
+            "creator",
+            actors,
+            accounts,
+            manifest,
+            initial_cash=_initial_cash(state),
+        )
+
+        def _write(sync_session: Any) -> None:
+            for market, spec in declared.items():
+                _write_declared_entitlement(
+                    sync_session,
+                    account=account,
+                    market=market,
+                    spec=spec,
+                    rule_namespace=manifest.tenant_ids[0],
+                )
+
+        await session.run_sync(_write)
 
     async def _seed_memories(
         self,
@@ -1603,6 +1737,8 @@ def _empty_snapshot() -> dict[str, Any]:
         "fills": {"count": 0, "records": []},
         "watchlist": {"count": 0, "codes": [], "records": []},
         "memory": {"count": 0, "records": [], "persona": []},
+        "entitlements": {"by_market": {}},
+        "permission_links": {"count": 0},
     }
 
 
@@ -1652,6 +1788,22 @@ def _validate_seed_projection(
         order_state["active_count"]
     ):
         raise ValueError(f"{case.case_id}: active order seed count mismatch")
+
+    declared_entitlements = _declared_entitlements(case, state)
+    if declared_entitlements:
+        expected_entitlements = {
+            _MARKET_CATALOG_ALIASES[market]: {
+                "status": spec["status"].value,
+                "can_buy": spec["can_buy"],
+                "can_sell": spec["can_sell"],
+                "can_subscribe": spec["can_subscribe"],
+            }
+            for market, spec in declared_entitlements.items()
+        }
+        if snapshot["entitlements"]["by_market"] != expected_entitlements:
+            raise ValueError(f"{case.case_id}: entitlement seed does not match environment input")
+    if snapshot["permission_links"] != {"count": 0}:
+        raise ValueError(f"{case.case_id}: permission links must remain read-only")
 
     if _case_requires_account(case):
         account_seed = _account_seed(case)
@@ -1766,11 +1918,67 @@ def _validate_seed_projection(
             raise ValueError("B4-02: position field seed does not match approved hidden truth")
 
 
+def _declared_entitlements(
+    case: ConversationCase,
+    state: dict[str, Any],
+) -> dict[Market, dict[str, Any]]:
+    raw = state.get("entitlements")
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"{case.case_id}: entitlements must be an object")
+    by_market = raw.get("by_market", {})
+    if not isinstance(by_market, dict):
+        raise ValueError(f"{case.case_id}: entitlements.by_market must be an object")
+    entries = list(by_market.items()) + [
+        (alias, value) for alias, value in raw.items() if alias != "by_market"
+    ]
+    declared: dict[Market, dict[str, Any]] = {}
+    for alias, value in entries:
+        try:
+            market = _CATALOG_MARKETS[str(alias)]
+        except KeyError as exc:
+            raise ValueError(f"{case.case_id}: unsupported entitlement market {alias!r}") from exc
+        if market in declared:
+            raise ValueError(f"{case.case_id}: duplicate entitlement market {market.value}")
+        if isinstance(value, bool):
+            status = EntitlementStatus.ENABLED if value else EntitlementStatus.NOT_APPLIED
+            can_buy = can_sell = can_subscribe = value
+        elif isinstance(value, dict):
+            status = EntitlementStatus(str(value.get("status", "not_applied")))
+            can_buy = bool(value.get("can_buy", False))
+            can_sell = bool(value.get("can_sell", False))
+            can_subscribe = bool(value.get("can_subscribe", False))
+        else:
+            raise ValueError(f"{case.case_id}: entitlement {alias!r} must be a boolean or object")
+        capabilities = (can_buy, can_sell, can_subscribe)
+        if status is EntitlementStatus.ENABLED and not any(capabilities):
+            raise ValueError(f"{case.case_id}: enabled {alias!r} needs a capability")
+        if status in {
+            EntitlementStatus.NOT_APPLIED,
+            EntitlementStatus.PENDING_DISCLOSURE,
+            EntitlementStatus.REVOKED,
+        } and any(capabilities):
+            raise ValueError(f"{case.case_id}: {status.value} {alias!r} cannot grant capability")
+        if status is EntitlementStatus.RESTRICTED and (can_buy or can_subscribe):
+            raise ValueError(f"{case.case_id}: restricted {alias!r} cannot buy or subscribe")
+        declared[market] = {
+            "status": status,
+            "can_buy": can_buy,
+            "can_sell": can_sell,
+            "can_subscribe": can_subscribe,
+        }
+    return declared
+
+
 def _case_requires_account(case: ConversationCase) -> bool:
     state = case.initial_state.business_state
     if case.case_id == "B4-01":
         return True
-    return any(key in state for key in ("account", "accounts", "cash", "funds", "positions"))
+    return any(
+        key in state
+        for key in ("account", "accounts", "cash", "funds", "positions", "entitlements")
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -2082,12 +2290,160 @@ class _SeedQuoteProvider:
         return self.get_sync(ts_code)
 
 
+def _eval_rule_version(rule_namespace: UUID | str) -> str:
+    return f"eval-{UUID(str(rule_namespace)).hex[:24]}"
+
+
+def _ensure_eval_market_rule(
+    session: Any,
+    *,
+    market: Market,
+    rule_namespace: UUID | str,
+) -> MarketAccessRule:
+    rule_version = _eval_rule_version(rule_namespace)
+    existing = session.scalar(
+        select(MarketAccessRule).where(
+            MarketAccessRule.market == market,
+            MarketAccessRule.rule_version == rule_version,
+        )
+    )
+    if existing is not None:
+        return cast(MarketAccessRule, existing)
+
+    session.execute(
+        text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+        {"lock_key": f"eval-market-access-rule:{market.value}"},
+    )
+    existing = session.scalar(
+        select(MarketAccessRule).where(
+            MarketAccessRule.market == market,
+            MarketAccessRule.rule_version == rule_version,
+        )
+    )
+    if existing is not None:
+        return cast(MarketAccessRule, existing)
+
+    epoch = date(1900, 1, 1)
+    span_days = (date(2026, 1, 1) - epoch).days
+    offset = UUID(str(rule_namespace)).int % span_days
+    occupied = set(
+        session.scalars(
+            select(MarketAccessRule.effective_from).where(MarketAccessRule.market == market)
+        ).all()
+    )
+    effective_from = next(
+        (
+            epoch + timedelta(days=(offset + step) % span_days)
+            for step in range(span_days)
+            if epoch + timedelta(days=(offset + step) % span_days) not in occupied
+        ),
+        None,
+    )
+    if effective_from is None:
+        raise RuntimeError(f"no eval rule effective date remains for {market.value}")
+    source = market_rulebook().current(market)
+    rule = MarketAccessRule(
+        market=market,
+        effective_from=effective_from,
+        minimum_average_assets_20d=source.minimum_average_assets_20d,
+        minimum_experience_months=source.minimum_experience_months,
+        required_disclosure_version=source.required_disclosure_version,
+        rule_version=rule_version,
+    )
+    session.add(rule)
+    session.flush()
+    return rule
+
+
+def _ensure_seed_order_entitlement(
+    session: Any,
+    *,
+    user_id: UUID,
+    market: Market,
+    side: OrderSide,
+    rule_namespace: UUID | str,
+    now: datetime,
+) -> MarketEntitlement:
+    account = PaperAccountService(session).get_active(user_id=user_id)
+    entitlement = session.scalar(
+        select(MarketEntitlement).where(
+            MarketEntitlement.account_id == account.id,
+            MarketEntitlement.account_generation == account.generation,
+            MarketEntitlement.market == market,
+        )
+    )
+    if entitlement is None:
+        entitlement = MarketEntitlement.new(account=account, market=market)
+        session.add(entitlement)
+    rule = _ensure_eval_market_rule(
+        session,
+        market=market,
+        rule_namespace=rule_namespace,
+    )
+    entitlement.status = EntitlementStatus.ENABLED
+    entitlement.can_buy = bool(entitlement.can_buy) or side is OrderSide.BUY
+    entitlement.can_sell = bool(entitlement.can_sell) or side is OrderSide.SELL
+    entitlement.can_subscribe = bool(entitlement.can_subscribe)
+    entitlement.rule_version = rule.rule_version
+    entitlement.enabled_at = now
+    entitlement.restricted_at = None
+    entitlement.reason_code = None
+    session.flush()
+    return cast(MarketEntitlement, entitlement)
+
+
+def _write_declared_entitlement(
+    session: Any,
+    *,
+    account: PaperAccount,
+    market: Market,
+    spec: dict[str, Any],
+    rule_namespace: UUID | str,
+) -> MarketEntitlement:
+    entitlement = session.scalar(
+        select(MarketEntitlement).where(
+            MarketEntitlement.account_id == account.id,
+            MarketEntitlement.account_generation == account.generation,
+            MarketEntitlement.market == market,
+        )
+    )
+    if entitlement is None:
+        entitlement = MarketEntitlement.new(account=account, market=market)
+        session.add(entitlement)
+    status = cast(EntitlementStatus, spec["status"])
+    rule = (
+        None
+        if status is EntitlementStatus.NOT_APPLIED
+        else _ensure_eval_market_rule(
+            session,
+            market=market,
+            rule_namespace=rule_namespace,
+        )
+    )
+    at = datetime(2026, 7, 20, 9, 0, tzinfo=_SHANGHAI)
+    entitlement.status = status
+    entitlement.can_buy = bool(spec["can_buy"])
+    entitlement.can_sell = bool(spec["can_sell"])
+    entitlement.can_subscribe = bool(spec["can_subscribe"])
+    entitlement.rule_version = rule.rule_version if rule is not None else None
+    entitlement.enabled_at = (
+        at if status in {EntitlementStatus.ENABLED, EntitlementStatus.RESTRICTED} else None
+    )
+    entitlement.restricted_at = at if status is EntitlementStatus.RESTRICTED else None
+    entitlement.reason_code = (
+        "eval_catalog_restricted" if status is EntitlementStatus.RESTRICTED else None
+    )
+    session.flush()
+    return cast(MarketEntitlement, entitlement)
+
+
 def _execute_seed_order(
     session: Any,
     *,
     user_id: UUID,
     spec: dict[str, Any],
     seed: str,
+    rule_namespace: str,
     now: datetime | None = None,
 ) -> PaperOrder:
     """Create one internally consistent order through production domain services."""
@@ -2116,6 +2472,14 @@ def _execute_seed_order(
         quantity=quantity,
         order_type=order_type,
         limit_price=Decimal(str(limit_value)) if limit_value is not None else None,
+    )
+    _ensure_seed_order_entitlement(
+        session,
+        user_id=user_id,
+        market=classify_market(ts_code),
+        side=draft.side,
+        rule_namespace=rule_namespace,
+        now=now,
     )
     run_id = UUID(bytes=hashlib.sha256(f"run:{seed}".encode()).digest()[:16], version=4)
     service = PaperOrderService(

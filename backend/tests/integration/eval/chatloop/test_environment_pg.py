@@ -6,6 +6,13 @@ from uuid import UUID, uuid4
 import pytest
 from app.memory.instrumentation import log_retrieval_hit, log_user_reject
 from app.memory.milvus_outbox import enqueue_milvus_insert
+from app.models.investor_suitability import (
+    EntitlementStatus,
+    Market,
+    MarketAccessRule,
+    MarketEntitlement,
+)
+from app.models.paper_account import PaperAccount
 from app.models.run import Run, RunEvent, RunMessage, RunSession
 from app.models.run_scheduling import RunOutbox, RunTenantScheduling
 from app.models.user import User
@@ -223,8 +230,250 @@ async def test_seed_uses_trade_position_and_current_memory_tables(environment_ma
 
 
 @pytest.mark.asyncio
+async def test_explicit_market_entitlements_are_current_user_database_facts(
+    environment_manager,
+    disposable_eval_async_session_factory,
+) -> None:
+    env = await environment_manager.prepare(_case("B6-04"), trial_index=0)
+
+    snapshot = await env.snapshot()
+    assert snapshot["entitlements"] == {
+        "by_market": {
+            "main_board": {
+                "status": "enabled",
+                "can_buy": True,
+                "can_sell": True,
+                "can_subscribe": True,
+            },
+            "gem": {
+                "status": "enabled",
+                "can_buy": True,
+                "can_sell": True,
+                "can_subscribe": True,
+            },
+            "star_market": {
+                "status": "not_applied",
+                "can_buy": False,
+                "can_sell": False,
+                "can_subscribe": False,
+            },
+            "bse": {
+                "status": "restricted",
+                "can_buy": False,
+                "can_sell": True,
+                "can_subscribe": False,
+            },
+        }
+    }
+    assert snapshot["permission_links"] == {"count": 0}
+    assert len(env.manifest.market_entitlement_ids) == 4
+    assert len(env.manifest.market_access_rule_ids) == 3
+    entitlement_ids = [UUID(value) for value in env.manifest.market_entitlement_ids]
+    rule_ids = [UUID(value) for value in env.manifest.market_access_rule_ids]
+
+    async with disposable_eval_async_session_factory() as session:
+        rows = list(
+            (
+                await session.scalars(
+                    select(MarketEntitlement).where(MarketEntitlement.id.in_(entitlement_ids))
+                )
+            ).all()
+        )
+        account = await session.get(PaperAccount, env.paper_account_id)
+    assert account is not None
+    assert account.user_id == env.primary_user_id
+    assert {row.account_id for row in rows} == {env.paper_account_id}
+    assert all(row.account_generation == account.generation for row in rows)
+
+    await env.cleanup()
+
+    async with disposable_eval_async_session_factory() as session:
+        for row_id in entitlement_ids:
+            assert await session.get(MarketEntitlement, row_id) is None
+        for row_id in rule_ids:
+            assert await session.get(MarketAccessRule, row_id) is None
+
+
+@pytest.mark.asyncio
+async def test_not_applied_entitlement_is_stable_and_cleanup_removes_its_fact(
+    environment_manager,
+    disposable_eval_async_session_factory,
+) -> None:
+    env = await environment_manager.prepare(_case("B6-06"), trial_index=0)
+
+    before = await env.capture_before()
+    after = await env.capture_after()
+    expected = {
+        "status": "not_applied",
+        "can_buy": False,
+        "can_sell": False,
+        "can_subscribe": False,
+    }
+    assert before["entitlements"]["by_market"]["star_market"] == expected
+    assert after["entitlements"]["by_market"]["star_market"] == expected
+    assert before["permission_links"] == after["permission_links"] == {"count": 0}
+    assert len(env.manifest.market_entitlement_ids) == 1
+    entitlement_id = UUID(env.manifest.market_entitlement_ids[0])
+
+    await env.cleanup()
+
+    async with disposable_eval_async_session_factory() as session:
+        assert await session.get(MarketEntitlement, entitlement_id) is None
+
+
+@pytest.mark.asyncio
+async def test_boolean_entitlements_are_projected_as_market_capabilities(
+    environment_manager,
+) -> None:
+    env = await environment_manager.prepare(_case("B8-05"), trial_index=0)
+
+    assert (await env.snapshot())["entitlements"] == {
+        "by_market": {
+            "main_board": {
+                "status": "enabled",
+                "can_buy": True,
+                "can_sell": True,
+                "can_subscribe": True,
+            },
+            "gem": {
+                "status": "not_applied",
+                "can_buy": False,
+                "can_sell": False,
+                "can_subscribe": False,
+            },
+        }
+    }
+
+    await env.cleanup()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("declared", "expected_status"),
+    [
+        (
+            {
+                "status": "not_applied",
+                "can_buy": False,
+                "can_sell": False,
+                "can_subscribe": False,
+            },
+            EntitlementStatus.NOT_APPLIED,
+        ),
+        (
+            {
+                "status": "restricted",
+                "can_buy": False,
+                "can_sell": True,
+                "can_subscribe": False,
+            },
+            EntitlementStatus.RESTRICTED,
+        ),
+    ],
+    ids=("not-applied", "restricted"),
+)
+async def test_historical_order_restores_declared_entitlement_final_state(
+    environment_manager,
+    disposable_eval_async_session_factory,
+    declared: dict[str, object],
+    expected_status: EntitlementStatus,
+) -> None:
+    base = _case("B7-01")
+    business_state = dict(base.initial_state.business_state)
+    business_state["entitlements"] = {"by_market": {"main": declared}}
+    case = base.model_copy(
+        update={
+            "initial_state": base.initial_state.model_copy(
+                update={"business_state": business_state}
+            )
+        }
+    )
+
+    env = await environment_manager.prepare(case, trial_index=0)
+    snapshot = await env.snapshot()
+
+    assert snapshot["orders"]["count"] == 1
+    assert snapshot["orders"]["latest"]["status"] == "partially_filled"
+    assert snapshot["entitlements"]["by_market"]["main_board"] == declared
+    assert len(env.manifest.market_entitlement_ids) == 1
+    assert len(env.manifest.market_access_rule_ids) == 1
+    entitlement_id = UUID(env.manifest.market_entitlement_ids[0])
+    rule_id = UUID(env.manifest.market_access_rule_ids[0])
+
+    async with disposable_eval_async_session_factory() as session:
+        entitlement = await session.get(MarketEntitlement, entitlement_id)
+        rule = await session.get(MarketAccessRule, rule_id)
+    assert entitlement is not None
+    assert entitlement.status is expected_status
+    assert entitlement.can_buy is declared["can_buy"]
+    assert entitlement.can_sell is declared["can_sell"]
+    assert entitlement.can_subscribe is declared["can_subscribe"]
+    assert rule is not None
+    if expected_status is EntitlementStatus.NOT_APPLIED:
+        assert entitlement.rule_version is None
+        assert entitlement.enabled_at is None
+        assert entitlement.restricted_at is None
+    else:
+        assert entitlement.rule_version == rule.rule_version
+        assert entitlement.enabled_at is not None
+        assert entitlement.restricted_at is not None
+
+    await env.cleanup()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("alias", "market", "snapshot_alias"),
+    [
+        ("main", Market.MAIN, "main_board"),
+        ("chinext", Market.CHINEXT, "gem"),
+        ("star", Market.STAR, "star_market"),
+    ],
+)
+async def test_entitlement_catalog_aliases_map_to_production_markets(
+    environment_manager,
+    disposable_eval_async_session_factory,
+    alias: str,
+    market: Market,
+    snapshot_alias: str,
+) -> None:
+    base = _case("B6-04")
+    declared = {
+        "status": "enabled",
+        "can_buy": True,
+        "can_sell": True,
+        "can_subscribe": True,
+    }
+    business_state = {
+        "entitlements": {"by_market": {alias: declared}},
+        "orders": {"count": 0},
+    }
+    case = base.model_copy(
+        update={
+            "initial_state": base.initial_state.model_copy(
+                update={"business_state": business_state}
+            )
+        }
+    )
+
+    env = await environment_manager.prepare(case, trial_index=0)
+
+    assert (await env.snapshot())["entitlements"] == {"by_market": {snapshot_alias: declared}}
+    async with disposable_eval_async_session_factory() as session:
+        entitlement = await session.get(
+            MarketEntitlement,
+            UUID(env.manifest.market_entitlement_ids[0]),
+        )
+    assert entitlement is not None
+    assert entitlement.market is market
+
+    await env.cleanup()
+
+
+@pytest.mark.asyncio
 async def test_partial_order_seed_uses_real_settlement_and_fee_reservation(
     environment_manager,
+    disposable_eval_async_session_factory,
 ) -> None:
     env = await environment_manager.prepare(_case("B7-01"), trial_index=0)
     snapshot = await env.snapshot()
@@ -237,6 +486,25 @@ async def test_partial_order_seed_uses_real_settlement_and_fee_reservation(
     assert len(env.manifest.match_pass_ids) == 1
     assert len(env.manifest.trade_ids) == 1
     assert len(env.manifest.holding_lot_ids) == 1
+    assert len(env.manifest.market_entitlement_ids) == 1
+    assert len(env.manifest.market_access_rule_ids) == 1
+    async with disposable_eval_async_session_factory() as session:
+        entitlement = await session.get(
+            MarketEntitlement,
+            UUID(env.manifest.market_entitlement_ids[0]),
+        )
+        rule = await session.get(
+            MarketAccessRule,
+            UUID(env.manifest.market_access_rule_ids[0]),
+        )
+    assert entitlement is not None
+    assert entitlement.market is Market.MAIN
+    assert entitlement.status is EntitlementStatus.ENABLED
+    assert entitlement.can_buy is True
+    assert entitlement.account_id == env.paper_account_id
+    assert rule is not None
+    assert rule.market is Market.MAIN
+    assert entitlement.rule_version == rule.rule_version
 
     await env.cleanup()
 
