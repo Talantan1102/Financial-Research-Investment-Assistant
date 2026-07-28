@@ -20,6 +20,8 @@ from eval.chatloop.judge_calibration import (
     JudgeNotCalibratedError,
 )
 from eval.chatloop.structured_evidence import (
+    SEMANTIC_JUDGE_PROMPT_SHA256,
+    SEMANTIC_JUDGE_RUBRIC_VERSION,
     BusinessStructuredEvidenceProvider,
     LLMSemanticEvidenceJudge,
     SemanticDecision,
@@ -68,7 +70,11 @@ def _case(assertions: list[AssertionSpec]) -> ConversationCase:
     )
 
 
-def _result(*, ledger: tuple[dict[str, Any], ...] | None = None) -> BusinessTrialResult:
+def _result(
+    *,
+    ledger: tuple[dict[str, Any], ...] | None = None,
+    assistant_text: str = "clear answer",
+) -> BusinessTrialResult:
     return BusinessTrialResult(
         case_id="B1-99",
         trial_index=0,
@@ -77,7 +83,7 @@ def _result(*, ledger: tuple[dict[str, Any], ...] | None = None) -> BusinessTria
         observation=BusinessObservation(
             transcript=(
                 {"role": "user", "content": "question"},
-                {"role": "assistant", "content": "clear answer"},
+                {"role": "assistant", "content": assistant_text},
             ),
             tool_ledger=ledger
             or (
@@ -182,6 +188,7 @@ async def test_semantic_judge_populates_only_judge_paths_with_audit() -> None:
                 assertion_id="quality",
                 condition_met=False,
                 rationale="too vague",
+                evidence_path="transcript.1.content",
                 evidence_quote="clear answer",
             ),
         ]
@@ -219,6 +226,7 @@ async def test_missing_answer_or_evidence_path_is_invalid_not_judge_synthesized(
                 assertion_id="rule",
                 condition_met=True,
                 rationale="would have synthesized expected evidence",
+                evidence_path="transcript.1.content",
                 evidence_quote="clear answer",
             )
         ]
@@ -247,6 +255,7 @@ async def test_uncertain_semantic_decision_fails_assertion_and_preserves_review_
                 condition_met=None,
                 review_reason="judge_uncertain",
                 rationale="the transcript is ambiguous",
+                evidence_path="transcript.1.content",
                 evidence_quote="clear answer",
             )
         ]
@@ -277,28 +286,33 @@ async def test_missing_or_duplicate_judge_decisions_are_invalid_evidence() -> No
 
 
 class FakeLLM:
-    def __init__(self, batch: SemanticJudgeBatch) -> None:
+    def __init__(self, batch: SemanticJudgeBatch, *, response_model: str | None = "fake") -> None:
         self.batch = batch
+        self.response_model = response_model
         self.calls: list[dict[str, Any]] = []
 
     def chat(self, prompt: str, **kwargs: Any):
         self.calls.append({"prompt": prompt, **kwargs})
-        return type("Response", (), {"parsed": self.batch})()
+        return type("Response", (), {"parsed": self.batch, "model": self.response_model})()
 
 
-def _calibrated_gate() -> JudgeCalibrationGate:
+def _calibrated_gate(*, judge_model: str = "fake") -> JudgeCalibrationGate:
+    identity = {
+        "judge_model": judge_model,
+        "judge_prompt_sha256": SEMANTIC_JUDGE_PROMPT_SHA256,
+        "rubric_version": SEMANTIC_JUDGE_RUBRIC_VERSION,
+    }
     return JudgeCalibrationGate.from_items(
         tuple(
             JudgeCalibrationItem(
                 id=f"sample-{index}",
                 human_label=(CalibrationLabel.PASS if index % 2 == 0 else CalibrationLabel.FAIL),
                 judge_label=(CalibrationLabel.PASS if index % 2 == 0 else CalibrationLabel.FAIL),
-                judge_model="fake",
-                judge_prompt_sha256="a" * 64,
-                rubric_version="business-semantic-v1",
+                **identity,
             )
             for index in range(30)
-        )
+        ),
+        expected_identity=identity,
     )
 
 
@@ -318,19 +332,89 @@ async def test_llm_judge_uses_structured_schema_and_verifies_quote() -> None:
                     assertion_id="quality",
                     condition_met=True,
                     rationale="answer is direct",
+                    evidence_path="transcript.1.content",
                     evidence_quote="clear answer",
                 )
             ]
         )
     )
-    judge = LLMSemanticEvidenceJudge(llm=llm, calibration_gate=_calibrated_gate())
+    judge = LLMSemanticEvidenceJudge(
+        llm=llm,
+        judge_model="fake",
+        calibration_gate=_calibrated_gate(),
+    )
 
     decisions = await judge.judge(case=_case([assertion]), result=_result(), assertions=[assertion])
 
     assert decisions[0].condition_met is True
     assert llm.calls[0]["schema"] is SemanticJudgeBatch
     assert llm.calls[0]["tier"] == "balanced"
+    assert llm.calls[0]["model"] == "fake"
     assert "quality" in llm.calls[0]["prompt"]
+    assert "reference_context" in llm.calls[0]["prompt"]
+    assert "observed_evidence" in llm.calls[0]["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_llm_judge_rejects_quote_found_only_in_hidden_facts() -> None:
+    assertion = AssertionSpec(
+        assertion_id="quality",
+        source="judge",
+        operator="equals",
+        path="rubric.clear",
+        expected="pass",
+    )
+    judge = LLMSemanticEvidenceJudge(
+        llm=FakeLLM(
+            SemanticJudgeBatch(
+                decisions=[
+                    SemanticDecision(
+                        assertion_id="quality",
+                        condition_met=True,
+                        rationale="copied reference data",
+                        evidence_path="hidden_facts.truth",
+                        evidence_quote="known",
+                    )
+                ]
+            )
+        ),
+        judge_model="fake",
+        calibration_gate=_calibrated_gate(),
+    )
+
+    with pytest.raises(InvalidEvidenceError, match="observed evidence"):
+        await judge.judge(case=_case([assertion]), result=_result(), assertions=[assertion])
+
+
+@pytest.mark.asyncio
+async def test_llm_judge_rejects_quote_found_only_in_assertion_expected() -> None:
+    assertion = AssertionSpec(
+        assertion_id="quality",
+        source="judge",
+        operator="equals",
+        path="rubric.clear",
+        expected="expected-only-token",
+    )
+    judge = LLMSemanticEvidenceJudge(
+        llm=FakeLLM(
+            SemanticJudgeBatch(
+                decisions=[
+                    SemanticDecision(
+                        assertion_id="quality",
+                        condition_met=True,
+                        rationale="copied assertion criteria",
+                        evidence_path="assertion_criteria.0.expected",
+                        evidence_quote="expected-only-token",
+                    )
+                ]
+            )
+        ),
+        judge_model="fake",
+        calibration_gate=_calibrated_gate(),
+    )
+
+    with pytest.raises(InvalidEvidenceError, match="observed evidence"):
+        await judge.judge(case=_case([assertion]), result=_result(), assertions=[assertion])
 
 
 @pytest.mark.asyncio
@@ -350,16 +434,216 @@ async def test_llm_judge_rejects_fabricated_evidence_quote() -> None:
                         assertion_id="quality",
                         condition_met=True,
                         rationale="unsupported",
+                        evidence_path="transcript.1.content",
                         evidence_quote="this text never appeared",
                     )
                 ]
             )
         ),
+        judge_model="fake",
         calibration_gate=_calibrated_gate(),
     )
 
     with pytest.raises(InvalidEvidenceError, match="quote is not present"):
         await judge.judge(case=_case([assertion]), result=_result(), assertions=[assertion])
+
+
+@pytest.mark.asyncio
+async def test_llm_judge_rejects_json_structure_character_as_quote() -> None:
+    assertion = AssertionSpec(
+        assertion_id="quality",
+        source="judge",
+        operator="equals",
+        path="rubric.clear",
+        expected="pass",
+    )
+    llm = FakeLLM(
+        SemanticJudgeBatch(
+            decisions=[
+                SemanticDecision(
+                    assertion_id="quality",
+                    condition_met=True,
+                    rationale="JSON punctuation is not source evidence",
+                    evidence_path="transcript.1.content",
+                    evidence_quote=":",
+                )
+            ]
+        )
+    )
+    judge = LLMSemanticEvidenceJudge(
+        llm=llm,
+        judge_model="fake",
+        calibration_gate=_calibrated_gate(),
+    )
+
+    with pytest.raises(InvalidEvidenceError, match="quote is not present"):
+        await judge.judge(case=_case([assertion]), result=_result(), assertions=[assertion])
+
+
+@pytest.mark.asyncio
+async def test_llm_judge_rejects_wrong_evidence_path() -> None:
+    assertion = AssertionSpec(
+        assertion_id="quality",
+        source="judge",
+        operator="equals",
+        path="rubric.clear",
+        expected="pass",
+    )
+    llm = FakeLLM(
+        SemanticJudgeBatch(
+            decisions=[
+                SemanticDecision(
+                    assertion_id="quality",
+                    condition_met=True,
+                    rationale="path does not exist",
+                    evidence_path="transcript.9.content",
+                    evidence_quote="clear answer",
+                )
+            ]
+        )
+    )
+    judge = LLMSemanticEvidenceJudge(
+        llm=llm,
+        judge_model="fake",
+        calibration_gate=_calibrated_gate(),
+    )
+
+    with pytest.raises(InvalidEvidenceError, match="evidence path"):
+        await judge.judge(case=_case([assertion]), result=_result(), assertions=[assertion])
+
+
+@pytest.mark.asyncio
+async def test_llm_judge_accepts_quote_with_real_quotes_and_backslash() -> None:
+    assertion = AssertionSpec(
+        assertion_id="quality",
+        source="judge",
+        operator="equals",
+        path="rubric.clear",
+        expected="pass",
+    )
+    assistant_text = 'Use "quoted" evidence from C:\\temp'
+    llm = FakeLLM(
+        SemanticJudgeBatch(
+            decisions=[
+                SemanticDecision(
+                    assertion_id="quality",
+                    condition_met=True,
+                    rationale="verbatim source text",
+                    evidence_path="transcript.1.content",
+                    evidence_quote='"quoted" evidence from C:\\temp',
+                )
+            ]
+        )
+    )
+    judge = LLMSemanticEvidenceJudge(
+        llm=llm,
+        judge_model="fake",
+        calibration_gate=_calibrated_gate(),
+    )
+
+    decisions = await judge.judge(
+        case=_case([assertion]),
+        result=_result(assistant_text=assistant_text),
+        assertions=[assertion],
+    )
+
+    assert decisions[0].evidence_path == "transcript.1.content"
+
+
+@pytest.mark.asyncio
+async def test_llm_judge_rejects_quote_visible_only_after_json_escaping() -> None:
+    assertion = AssertionSpec(
+        assertion_id="quality",
+        source="judge",
+        operator="equals",
+        path="rubric.clear",
+        expected="pass",
+    )
+    llm = FakeLLM(
+        SemanticJudgeBatch(
+            decisions=[
+                SemanticDecision(
+                    assertion_id="quality",
+                    condition_met=True,
+                    rationale="copied JSON encoding",
+                    evidence_path="transcript.1.content",
+                    evidence_quote='\\"quoted\\"',
+                )
+            ]
+        )
+    )
+    judge = LLMSemanticEvidenceJudge(
+        llm=llm,
+        judge_model="fake",
+        calibration_gate=_calibrated_gate(),
+    )
+
+    with pytest.raises(InvalidEvidenceError, match="quote is not present"):
+        await judge.judge(
+            case=_case([assertion]),
+            result=_result(assistant_text='Use "quoted" evidence'),
+            assertions=[assertion],
+        )
+
+
+@pytest.mark.asyncio
+async def test_llm_judge_rejects_requested_model_not_bound_to_calibration() -> None:
+    assertion = AssertionSpec(
+        assertion_id="quality",
+        source="judge",
+        operator="equals",
+        path="rubric.clear",
+        expected="pass",
+    )
+    llm = FakeLLM(SemanticJudgeBatch(decisions=[]), response_model="requested-model")
+    judge = LLMSemanticEvidenceJudge(
+        llm=llm,
+        judge_model="requested-model",
+        calibration_gate=_calibrated_gate(judge_model="calibrated-model"),
+    )
+
+    with pytest.raises(JudgeNotCalibratedError, match="judge model"):
+        await judge.judge(case=_case([assertion]), result=_result(), assertions=[assertion])
+
+    assert llm.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("response_model", [None, "other-model"])
+async def test_llm_judge_rejects_missing_or_mismatched_response_model(
+    response_model: str | None,
+) -> None:
+    assertion = AssertionSpec(
+        assertion_id="quality",
+        source="judge",
+        operator="equals",
+        path="rubric.clear",
+        expected="pass",
+    )
+    llm = FakeLLM(
+        SemanticJudgeBatch(
+            decisions=[
+                SemanticDecision(
+                    assertion_id="quality",
+                    condition_met=True,
+                    rationale="response came from the wrong model",
+                    evidence_path="transcript.1.content",
+                    evidence_quote="clear answer",
+                )
+            ]
+        ),
+        response_model=response_model,
+    )
+    judge = LLMSemanticEvidenceJudge(
+        llm=llm,
+        judge_model="fake",
+        calibration_gate=_calibrated_gate(),
+    )
+
+    with pytest.raises(InvalidEvidenceError, match="response model"):
+        await judge.judge(case=_case([assertion]), result=_result(), assertions=[assertion])
+
+    assert llm.calls[0]["model"] == "fake"
 
 
 @pytest.mark.asyncio
@@ -373,9 +657,44 @@ async def test_llm_judge_fails_closed_before_model_call_when_uncalibrated() -> N
     )
     llm = FakeLLM(SemanticJudgeBatch(decisions=[]))
     gate = JudgeCalibrationGate.from_items(())
-    judge = LLMSemanticEvidenceJudge(llm=llm, calibration_gate=gate)
+    judge = LLMSemanticEvidenceJudge(llm=llm, judge_model="fake", calibration_gate=gate)
 
     with pytest.raises(JudgeNotCalibratedError, match="not calibrated"):
+        await judge.judge(case=_case([assertion]), result=_result(), assertions=[assertion])
+
+    assert llm.calls == []
+
+
+@pytest.mark.asyncio
+async def test_llm_judge_rejects_calibrated_old_prompt_without_expected_identity() -> None:
+    assertion = AssertionSpec(
+        assertion_id="quality",
+        source="judge",
+        operator="equals",
+        path="rubric.clear",
+        expected="pass",
+    )
+    old_prompt_sha256 = "a" * 64
+    assert old_prompt_sha256 != SEMANTIC_JUDGE_PROMPT_SHA256
+    gate = JudgeCalibrationGate.from_items(
+        tuple(
+            JudgeCalibrationItem(
+                id=f"old-prompt-{index}",
+                human_label=(CalibrationLabel.PASS if index % 2 == 0 else CalibrationLabel.FAIL),
+                judge_label=(CalibrationLabel.PASS if index % 2 == 0 else CalibrationLabel.FAIL),
+                judge_model="fake",
+                judge_prompt_sha256=old_prompt_sha256,
+                rubric_version=SEMANTIC_JUDGE_RUBRIC_VERSION,
+            )
+            for index in range(30)
+        )
+    )
+    assert gate.calibrated is True
+    assert gate.expected_identity is None
+    llm = FakeLLM(SemanticJudgeBatch(decisions=[]))
+    judge = LLMSemanticEvidenceJudge(llm=llm, judge_model="fake", calibration_gate=gate)
+
+    with pytest.raises(JudgeNotCalibratedError, match="expected identity"):
         await judge.judge(case=_case([assertion]), result=_result(), assertions=[assertion])
 
     assert llm.calls == []

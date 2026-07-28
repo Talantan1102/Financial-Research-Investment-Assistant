@@ -202,6 +202,23 @@ def test_assertion_ids_and_references_are_valid(catalog: CaseCatalog) -> None:
             ), case.case_id
 
 
+def test_tool_name_membership_assertions_never_use_raw_call_objects(
+    catalog: CaseCatalog,
+) -> None:
+    name_list_paths = {"called", "call_sequence", "order_write_calls"}
+    invalid = [
+        (case.case_id, assertion.assertion_id, assertion.path)
+        for case in catalog.cases
+        for assertion in _all_assertions(case)
+        if assertion.source == "tools"
+        and assertion.operator in {"contains", "not_contains"}
+        and isinstance(assertion.expected, str)
+        and assertion.path not in name_list_paths
+    ]
+
+    assert invalid == []
+
+
 def test_retail_dialogue_lint(catalog: CaseCatalog) -> None:
     complete_conversations: set[tuple[str, ...]] = set()
     colloquial_or_noisy = re.compile(

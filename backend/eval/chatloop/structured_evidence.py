@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, StrictBool, model_validator
 from eval.chatloop.business_pipeline import InvalidEvidenceError
 from eval.chatloop.business_runner import BusinessTrialResult
 from eval.chatloop.case_schema import AssertionSpec, ConversationCase
-from eval.chatloop.judge_calibration import JudgeCalibrationGate
+from eval.chatloop.judge_calibration import JudgeCalibrationGate, JudgeNotCalibratedError
 
 _BUSINESS_WRITE_TOOLS = frozenset(
     {
@@ -36,8 +36,19 @@ _SEMANTIC_JUDGE_INSTRUCTIONS = (
     "每条必须给出 evidence_quote，且原文必须出现在证据 JSON 中。"
     "证据不足或冲突时 condition_met 填 null，并分别使用 judge_uncertain 或 judge_conflict。"
 )
+_SEMANTIC_JUDGE_EVIDENCE_BOUNDARY_INSTRUCTIONS = (
+    "The prompt has two explicitly separated sections: reference_context and "
+    "observed_evidence. reference_context contains expected/reference material and "
+    "must never be treated as proof. Every decision must provide a non-empty evidence_path "
+    "to an original string leaf inside observed_evidence. Every evidence_quote must be "
+    "non-empty and copied verbatim from that exact string leaf. JSON structure or escaping, "
+    "and content found only in reference_context or assertion criteria, are invalid evidence."
+)
+_SEMANTIC_JUDGE_CALIBRATION_INSTRUCTIONS = (
+    f"{_SEMANTIC_JUDGE_INSTRUCTIONS}\n{_SEMANTIC_JUDGE_EVIDENCE_BOUNDARY_INSTRUCTIONS}"
+)
 SEMANTIC_JUDGE_PROMPT_SHA256 = hashlib.sha256(
-    _SEMANTIC_JUDGE_INSTRUCTIONS.encode("utf-8")
+    _SEMANTIC_JUDGE_CALIBRATION_INSTRUCTIONS.encode("utf-8")
 ).hexdigest()
 
 
@@ -48,10 +59,13 @@ class SemanticDecision(BaseModel):
     condition_met: StrictBool | None
     review_reason: Literal["judge_uncertain", "judge_conflict"] | None = None
     rationale: str
+    evidence_path: str
     evidence_quote: str
 
     @model_validator(mode="after")
     def validate_decision_or_review(self) -> SemanticDecision:
+        if not self.evidence_path.strip():
+            raise ValueError("semantic decisions require a non-empty evidence_path")
         if (self.condition_met is None) != (self.review_reason is not None):
             raise ValueError(
                 "semantic decisions require condition_met for decided results "
@@ -79,8 +93,15 @@ class SemanticEvidenceJudge(Protocol):
 class LLMSemanticEvidenceJudge:
     """One structured model call whose decisions retain source-grounded quotes."""
 
-    def __init__(self, *, llm: Any, calibration_gate: JudgeCalibrationGate) -> None:
+    def __init__(
+        self,
+        *,
+        llm: Any,
+        judge_model: str,
+        calibration_gate: JudgeCalibrationGate,
+    ) -> None:
         self._llm = llm
+        self._judge_model = judge_model
         self._calibration_gate = calibration_gate
 
     async def judge(
@@ -90,47 +111,74 @@ class LLMSemanticEvidenceJudge:
         result: BusinessTrialResult,
         assertions: Sequence[AssertionSpec],
     ) -> Sequence[SemanticDecision]:
+        expected_identity = self._calibration_gate.expected_identity
+        if expected_identity is None:
+            raise JudgeNotCalibratedError(
+                "business semantic judge is not calibrated: expected identity is required"
+            )
+        if expected_identity.judge_model != self._judge_model:
+            raise JudgeNotCalibratedError(
+                "business semantic judge is not calibrated: expected identity judge model "
+                "does not match requested judge model"
+            )
+        if expected_identity.judge_prompt_sha256 != SEMANTIC_JUDGE_PROMPT_SHA256:
+            raise JudgeNotCalibratedError(
+                "business semantic judge is not calibrated: expected identity has a stale prompt"
+            )
+        if expected_identity.rubric_version != SEMANTIC_JUDGE_RUBRIC_VERSION:
+            raise JudgeNotCalibratedError(
+                "business semantic judge is not calibrated: expected identity has a stale rubric"
+            )
         self._calibration_gate.require_calibrated()
         raw = result.observation
         if raw is None:
             raise InvalidEvidenceError("semantic judge received no observation")
-        evidence = {
+        reference_context = {
             "hidden_facts": case.hidden_facts,
             "answer_requirements": case.answer_requirements,
             "allowed_variations": case.allowed_variations,
+            "assertion_criteria": [item.model_dump(mode="json") for item in assertions],
+        }
+        observed_evidence = {
             "transcript": list(raw.transcript),
             "tool_ledger": list(raw.tool_ledger),
             "database_before_after": result.database_before_after,
             "raw_evidence": raw.evidence,
+            "run_state": raw.run_state,
         }
-        evidence_json = json.dumps(evidence, ensure_ascii=False, sort_keys=True, default=str)
-        assertion_json = json.dumps(
-            [item.model_dump(mode="json") for item in assertions],
+        reference_context_json = json.dumps(
+            reference_context,
             ensure_ascii=False,
             sort_keys=True,
+            default=str,
         )
-        prompt = (
-            "你是金融对话评估裁判。逐条判断断言描述的条件是否在证据中成立。"
-            "condition_met 表示断言本身是否成立，不表示这个行为是否值得鼓励；"
-            "禁用结果如果实际出现，也应填 true。不得补造事实。"
-            "每条都必须给出 evidence_quote，且必须逐字出现在下方证据 JSON 中。\n"
-            "如果证据不足或相互冲突，不得猜测：condition_met 填 null，并分别填 "
-            "review_reason=judge_uncertain 或 judge_conflict。\n"
-            f"case_id: {case.case_id}\n断言: {assertion_json}\n证据: {evidence_json}"
+        observed_evidence_json = json.dumps(
+            observed_evidence,
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
         )
         # The stable instruction block is the calibration identity. Dynamic case
         # evidence and assertions are appended but never allowed to change its policy.
         prompt = (
-            f"{_SEMANTIC_JUDGE_INSTRUCTIONS}\n"
-            f"case_id: {case.case_id}\n断言: {assertion_json}\n证据: {evidence_json}"
+            f"{_SEMANTIC_JUDGE_CALIBRATION_INSTRUCTIONS}\n"
+            f"case_id: {case.case_id}\n"
+            f"reference_context: {reference_context_json}\n"
+            f"observed_evidence: {observed_evidence_json}"
         )
         response = await asyncio.to_thread(
             self._llm.chat,
             prompt,
             tier="balanced",
+            model=self._judge_model,
             schema=SemanticJudgeBatch,
             request_id=f"eval-judge-{case.case_id}-{result.trial_index}",
         )
+        response_model = getattr(response, "model", None)
+        if response_model != self._judge_model:
+            raise InvalidEvidenceError(
+                "semantic judge response model does not match requested judge model"
+            )
         parsed = getattr(response, "parsed", None)
         if not isinstance(parsed, SemanticJudgeBatch):
             raise InvalidEvidenceError("semantic judge did not return the required schema")
@@ -139,9 +187,20 @@ class LLMSemanticEvidenceJudge:
                 raise InvalidEvidenceError(
                     f"semantic judge returned an empty quote for {decision.assertion_id}"
                 )
-            if decision.evidence_quote not in evidence_json:
+            evidence_leaf = _resolve_path(observed_evidence, decision.evidence_path)
+            if evidence_leaf is _MISSING:
                 raise InvalidEvidenceError(
-                    f"semantic judge quote is not present in evidence for {decision.assertion_id}"
+                    "semantic judge evidence path is not present in observed evidence for "
+                    f"{decision.assertion_id}"
+                )
+            if not isinstance(evidence_leaf, str):
+                raise InvalidEvidenceError(
+                    f"semantic judge evidence path is not a string leaf for {decision.assertion_id}"
+                )
+            if decision.evidence_quote not in evidence_leaf:
+                raise InvalidEvidenceError(
+                    "semantic judge quote is not present at its observed evidence path for "
+                    f"{decision.assertion_id}"
                 )
         return tuple(parsed.decisions)
 
@@ -295,11 +354,16 @@ def _project_tools(ledger: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     return projected
 
 
-def _path_exists(root: Any, path: str) -> bool:
-    if path == "":
-        return root is not None
+_MISSING = object()
+
+
+def _resolve_path(root: Any, path: str) -> Any:
+    if not path:
+        return _MISSING
     current = root
     for segment in path.split("."):
+        if not segment:
+            return _MISSING
         if isinstance(current, Mapping) and segment in current:
             current = current[segment]
             continue
@@ -311,8 +375,14 @@ def _path_exists(root: Any, path: str) -> bool:
         ):
             current = current[int(segment)]
             continue
-        return False
-    return True
+        return _MISSING
+    return current
+
+
+def _path_exists(root: Any, path: str) -> bool:
+    if path == "":
+        return root is not None
+    return _resolve_path(root, path) is not _MISSING
 
 
 def _assertion_evidence_exists(projected: Mapping[str, Any], assertion: AssertionSpec) -> bool:

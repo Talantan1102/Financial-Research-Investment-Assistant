@@ -220,7 +220,11 @@ def _build_components(
     )
     provider = BusinessStructuredEvidenceProvider(
         versions=effective_versions,
-        semantic_judge=LLMSemanticEvidenceJudge(llm=llm, calibration_gate=gate),
+        semantic_judge=LLMSemanticEvidenceJudge(
+            llm=llm,
+            judge_model=versions["model"],
+            calibration_gate=gate,
+        ),
     )
     artifact_root = Path(
         os.getenv(
