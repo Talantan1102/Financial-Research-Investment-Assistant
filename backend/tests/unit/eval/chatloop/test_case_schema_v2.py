@@ -77,6 +77,30 @@ def test_new_catalog_case_has_capability_trial_defaults_and_null_results() -> No
     assert case.failure_reason is None
 
 
+def test_evidence_boolean_rejects_string_input() -> None:
+    raw = minimal_case_dict()
+    raw["evidence"]["transcript"] = "false"
+
+    with pytest.raises(ValidationError, match="transcript"):
+        ConversationCase.model_validate(raw)
+
+
+def test_score_component_points_rejects_numeric_string() -> None:
+    raw = minimal_case_dict()
+    raw["partial_credit"] = [{"name_zh": "事实回答", "points": "10", "assertion_ids": []}]
+
+    with pytest.raises(ValidationError, match="points"):
+        ConversationCase.model_validate(raw)
+
+
+def test_trial_count_rejects_numeric_string() -> None:
+    raw = minimal_case_dict()
+    raw["trial_count"] = "2"
+
+    with pytest.raises(ValidationError, match="trial_count"):
+        ConversationCase.model_validate(raw)
+
+
 @pytest.mark.parametrize(
     ("field_name", "value"),
     [

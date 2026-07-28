@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, PositiveInt
+from pydantic import BaseModel, ConfigDict, Field, PositiveInt, StrictBool
 
 __all__ = [
     "AcceptableOutcome",
@@ -89,7 +89,7 @@ class ScoreComponent(_StrictModel):
     """A partial-credit component in a case score."""
 
     name_zh: str = Field(description="部分得分项的中文名称")
-    points: int = Field(ge=0, le=100, description="该得分项分值，范围为零到一百分")
+    points: int = Field(strict=True, ge=0, le=100, description="该得分项分值，范围为零到一百分")
     assertion_ids: list[str] = Field(
         default_factory=list, description="决定该得分项是否获得的断言标识列表"
     )
@@ -98,11 +98,11 @@ class ScoreComponent(_StrictModel):
 class EvidenceRequirements(_StrictModel):
     """Evidence artifacts that a valid trial must preserve."""
 
-    transcript: bool = Field(description="是否必须保存完整对话记录")
-    tool_ledger: bool = Field(description="是否必须保存工具调用账本")
-    database_before_after: bool = Field(description="是否必须保存数据库前后状态快照")
-    versions: bool = Field(description="是否必须保存模型、代码和策略版本信息")
-    cost_latency: bool = Field(default=True, description="是否必须保存成本和延迟数据")
+    transcript: StrictBool = Field(description="是否必须保存完整对话记录")
+    tool_ledger: StrictBool = Field(description="是否必须保存工具调用账本")
+    database_before_after: StrictBool = Field(description="是否必须保存数据库前后状态快照")
+    versions: StrictBool = Field(description="是否必须保存模型、代码和策略版本信息")
+    cost_latency: StrictBool = Field(default=True, description="是否必须保存成本和延迟数据")
 
 
 _AxisName = Literal[
@@ -185,7 +185,9 @@ class ConversationCase(_StrictModel):
     violation_caps: dict[str, Literal["C0", "C1", "C2", "C3"]] = Field(
         description="按策略标识配置的违规得分上限"
     )
-    trial_count: PositiveInt = Field(default=1, description="该用例计划重复执行的正整数次数")
+    trial_count: PositiveInt = Field(
+        default=1, strict=True, description="该用例计划重复执行的正整数次数"
+    )
     trial_status: None = Field(default=None, description="目录中固定为空的试验有效性结果字段")
     task_pass: None = Field(default=None, description="目录中固定为空的任务通过结果字段")
     task_score: None = Field(default=None, description="目录中固定为空的任务得分结果字段")
