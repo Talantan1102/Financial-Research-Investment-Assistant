@@ -6,7 +6,7 @@
 
 > 本文件保存该批完整用例。所有字段的中文定义、统一枚举和判分优先级见主设计文档。若单例未重复书写运行结果字段，则继承以下默认值：`trial_status=null`、`task_pass=null`、`task_score=null`、`failure_reason=null`。诊断分不能补偿任何 `required_assertions` 失败。
 
-第 7 批订单生命周期定为 **17 个 Capability 用例**。累计用例数从 90 个增加到 **107 个**。
+第 7 批订单生命周期定为 **17 个 Capability 用例**。累计用例数从 91 个增加到 **108 个**。
 
 这一批以两条事实为基础：
 

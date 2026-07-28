@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, PositiveInt, StrictBool
+from pydantic import BaseModel, ConfigDict, Field, PositiveInt, StrictBool, model_validator
 
 __all__ = [
     "AcceptableOutcome",
@@ -197,3 +197,39 @@ class ConversationCase(_StrictModel):
     task_score: None = Field(default=None, description="目录中固定为空的任务得分结果字段")
     failure_reason: None = Field(default=None, description="目录中固定为空的任务失败原因字段")
     evidence: EvidenceRequirements = Field(description="有效试验必须保存的证据要求")
+
+    @model_validator(mode="after")
+    def validate_policy_branches_and_grader_sources(self) -> ConversationCase:
+        if any(
+            assertion.policy_id is not None or assertion.severity is not None
+            for outcome in self.acceptable_outcomes
+            for assertion in outcome.assertions
+        ):
+            raise ValueError(
+                "acceptable_outcomes cannot carry policy caps; "
+                "move common policy assertions to required or expected assertions"
+            )
+
+        assertions = [
+            *self.required_assertions,
+            *self.forbidden_outcomes,
+            *self.expected_state_changes,
+            *[
+                assertion
+                for outcome in self.acceptable_outcomes
+                for assertion in outcome.assertions
+            ],
+        ]
+        source_by_id = {assertion.assertion_id: assertion.source for assertion in assertions}
+        for grader in self.graders:
+            for assertion_id in grader.assertion_ids:
+                source = source_by_id.get(assertion_id)
+                if source is None:
+                    continue
+                if (source == "judge") != (grader.type == "judge"):
+                    raise ValueError(
+                        "judge assertions must be owned only by judge graders, "
+                        f"but {assertion_id!r} uses source={source!r} "
+                        f"with grader={grader.type!r}"
+                    )
+        return self

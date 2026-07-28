@@ -30,6 +30,19 @@ __all__ = [
 ]
 
 _CASE_ID = re.compile(r"^B(?P<batch>[1-8])-(?P<number>\d{2})$")
+_EXPECTED_SOURCE_SPECS = tuple(
+    f"docs/superpowers/specs/conversational-agent-eval-cases/batch-{batch}-{slug}.md"
+    for batch, slug in (
+        (1, "foundations"),
+        (2, "research-calculation"),
+        (3, "investment-judgment"),
+        (4, "personal-context"),
+        (5, "watchlist"),
+        (6, "trading-entitlements"),
+        (7, "order-lifecycle"),
+        (8, "cross-task-pressure"),
+    )
+)
 
 
 class CaseCatalogError(ValueError):
@@ -119,6 +132,11 @@ def load_catalog(manifest_path: Path | str | None = None) -> CaseCatalog:
     expected_batches = {item.batch for item in manifest.batches}
     if expected_batches != set(range(1, 9)) or len(manifest.batches) != 8:
         raise CaseCatalogError("catalog must declare each batch 1 through 8 exactly once")
+    expected_files = {batch: f"batch-{batch}.jsonl" for batch in range(1, 9)}
+    if {item.batch: item.file for item in manifest.batches} != expected_files:
+        raise CaseCatalogError("catalog must use the eight canonical batch JSONL paths")
+    if tuple(manifest.source_specs) != _EXPECTED_SOURCE_SPECS:
+        raise CaseCatalogError("source_specs must list the eight canonical design documents")
 
     registry = PolicyRegistry.default()
     aliases = set(registry.aliases)
@@ -193,6 +211,15 @@ def _audit_case(
     aliases: set[str],
     manifest: CatalogManifest,
 ) -> None:
+    if any(
+        assertion.policy_id is not None or assertion.severity is not None
+        for outcome in case.acceptable_outcomes
+        for assertion in outcome.assertions
+    ):
+        raise CaseCatalogError(
+            f"acceptable_outcomes cannot trigger policy caps in {case.case_id}; "
+            "move common policy assertions to required or expected assertions"
+        )
     assertions = _all_assertions(case)
     assertion_ids = [assertion.assertion_id for assertion in assertions]
     if len(assertion_ids) != len(set(assertion_ids)):

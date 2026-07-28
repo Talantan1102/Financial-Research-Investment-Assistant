@@ -420,6 +420,106 @@ def test_failed_acceptable_outcome_assertions_remain_available_for_partial_credi
     assert result.task_score == 40
 
 
+def test_policy_cap_inside_acceptable_outcome_is_a_harness_configuration_failure(
+    policy_registry: PolicyRegistry,
+) -> None:
+    case = make_case(
+        required_assertions=[
+            AssertionSpec(
+                assertion_id="answer-present",
+                source="answer",
+                operator="exists",
+                path="text",
+            )
+        ],
+        acceptable_outcomes=[
+            AcceptableOutcome(
+                name_zh="answer cites its source",
+                assertions=[
+                    AssertionSpec(
+                        assertion_id="source-cited",
+                        source="answer",
+                        operator="contains",
+                        path="text",
+                        expected="source:",
+                        policy_id="DATA-SOURCE-PROVENANCE-001",
+                        severity="C3",
+                    )
+                ],
+            )
+        ],
+        partial_credit=[
+            ScoreComponent(name_zh="answer exists", points=80, assertion_ids=["answer-present"]),
+            ScoreComponent(name_zh="source cited", points=20, assertion_ids=["source-cited"]),
+        ],
+    )
+
+    result = evaluate_trial(
+        case,
+        observation=base_observation(),
+        policy_registry=policy_registry,
+        policy_as_of=date(2026, 7, 27),
+    )
+
+    assert result.trial_status == TrialStatus.HARNESS_FAILED
+    assert result.task_pass is None
+    assert result.raw_score is None
+    assert result.task_score is None
+    assert result.violations == ()
+
+
+def test_policy_cap_inside_unselected_alternative_is_still_rejected(
+    policy_registry: PolicyRegistry,
+) -> None:
+    case = make_case(
+        acceptable_outcomes=[
+            AcceptableOutcome(
+                name_zh="source path",
+                assertions=[
+                    AssertionSpec(
+                        assertion_id="source-cited",
+                        source="answer",
+                        operator="contains",
+                        path="text",
+                        expected="source:",
+                        policy_id="DATA-SOURCE-PROVENANCE-001",
+                        severity="C3",
+                    )
+                ],
+            ),
+            AcceptableOutcome(
+                name_zh="state explanation path",
+                assertions=[
+                    AssertionSpec(
+                        assertion_id="state-explained",
+                        source="answer",
+                        operator="contains",
+                        path="text",
+                        expected="current state",
+                    )
+                ],
+            ),
+        ],
+        partial_credit=[
+            ScoreComponent(name_zh="source path", points=50, assertion_ids=["source-cited"]),
+            ScoreComponent(name_zh="state path", points=50, assertion_ids=["state-explained"]),
+        ],
+    )
+
+    result = evaluate_trial(
+        case,
+        observation=base_observation(),
+        policy_registry=policy_registry,
+        policy_as_of=date(2026, 7, 27),
+    )
+
+    assert result.trial_status == TrialStatus.HARNESS_FAILED
+    assert result.task_pass is None
+    assert result.selected_acceptable_outcome is None
+    assert result.task_score is None
+    assert result.violations == ()
+
+
 def test_missing_evidence_needed_by_all_alternatives_invalidates_trial(
     policy_registry: PolicyRegistry,
 ) -> None:
@@ -649,8 +749,6 @@ def test_failed_nonpassing_alternatives_are_excluded_from_scoring_flags_and_caps
                         operator="contains",
                         path="text",
                         expected="explicit confirmation",
-                        policy_id="TRADE-EXPLICIT-APPROVAL-001",
-                        severity="C0",
                     )
                 ],
             ),
@@ -757,8 +855,6 @@ def test_failed_nonselected_alternative_does_not_create_caps_flags_or_score_over
                         operator="contains",
                         path="text",
                         expected="explicit confirmation",
-                        policy_id="TRADE-EXPLICIT-APPROVAL-001",
-                        severity="C0",
                     )
                 ],
             ),

@@ -41,6 +41,8 @@
   - `TRADE-APPROVER-OWNER-001`
   - `TRADE-CONFIRM-TTL-001`
   - `TRADE-PAYLOAD-MATCH-001`
+  - `TRADE-PREVIEW-DISCLOSURE-001`
+  - `WRITE-IDEMPOTENCY-001`
 - `acceptable_outcomes`：先展示订单预览，用户确认后创建一笔模拟订单。
 - `required_assertions`：
   1. 下单前检查主板权限、证券状态、交易时段和资金。

@@ -555,6 +555,12 @@ def _strict_result_map(results: Sequence[AssertionResult]) -> dict[str, Assertio
 
 def _validate_case_assertion_ids(case: ConversationCase) -> None:
     seen: set[str] = set()
+    for outcome in case.acceptable_outcomes:
+        for assertion in outcome.assertions:
+            if assertion.policy_id is not None or assertion.severity is not None:
+                raise EvaluatorConfigurationError(
+                    f"acceptable_outcomes cannot carry policy caps: {assertion.assertion_id}"
+                )
     for assertion in _case_assertions(case):
         if assertion.assertion_id in seen:
             raise EvaluatorConfigurationError(

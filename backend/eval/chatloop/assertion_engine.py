@@ -163,7 +163,7 @@ class AssertionEngine:
         if operator == "not_equals":
             return not self._strict_equal(actual, expected)
         if operator == "exists":
-            return True
+            return self._is_non_empty(actual)
         if operator == "contains":
             return self._contains(actual, expected)
         if operator == "not_contains":
@@ -180,6 +180,17 @@ class AssertionEngine:
         if operator == "subset":
             return self._subset(actual, expected)
         raise ValueError(f"unsupported operator: {operator}")
+
+    def _is_non_empty(self, actual: Any) -> bool:
+        if actual is None:
+            return False
+        if isinstance(actual, str):
+            return bool(actual.strip())
+        if isinstance(actual, (Mapping, Sequence, set, frozenset)) and not isinstance(
+            actual, (bytes, bytearray)
+        ):
+            return len(actual) > 0
+        return True
 
     def _lookup(self, source_value: Any, path: str) -> _LookupResult:
         if path == "":

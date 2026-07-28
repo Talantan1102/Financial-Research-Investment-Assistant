@@ -234,7 +234,7 @@ def test_every_approved_case_policy_is_registered(registry: PolicyRegistry) -> N
     approved = _approved_policy_ids()
     registered = {record.policy_id for record in registry.records}
 
-    assert len(approved) == 136
+    assert len(approved) == 137
     assert registered == approved
 
 
@@ -251,4 +251,4 @@ def test_plan_short_ids_are_aliases_not_duplicate_policy_records(
         registry.resolve("TRADE-SESSION", as_of=date(2026, 7, 27), version="2026.1").policy_id
         == "TRD-MARKET-TIME-001"
     )
-    assert len(registry.records) == 136
+    assert len(registry.records) == 137

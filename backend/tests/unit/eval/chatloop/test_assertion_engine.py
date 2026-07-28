@@ -103,7 +103,9 @@ def test_top_level_null_source_is_invalid_evidence(engine: AssertionEngine) -> N
     assert result.kind == "invalid_evidence"
 
 
-def test_present_nested_null_path_still_counts_as_exists(engine: AssertionEngine) -> None:
+def test_present_nested_null_path_does_not_count_as_usable_evidence(
+    engine: AssertionEngine,
+) -> None:
     result = engine.evaluate(
         AssertionSpec(
             assertion_id="tool-calls-exist",
@@ -114,8 +116,8 @@ def test_present_nested_null_path_still_counts_as_exists(engine: AssertionEngine
         observation=passing_observation(),
     )
 
-    assert result.passed is True
-    assert result.kind == "passed"
+    assert result.passed is False
+    assert result.kind == "assertion_failed"
     assert result.actual is None
 
 
@@ -167,13 +169,29 @@ def test_present_null_value_is_not_treated_as_missing(engine: AssertionEngine) -
         observation=passing_observation(),
     )
 
-    assert exists_result.passed is True
+    assert exists_result.passed is False
     assert absent_result.passed is False
     assert equals_none_result.passed is True
     assert equals_none_result.actual is None
     assert equals_none_result.expected is None
     assert equals_none_result.policy_id == "DATA-SOURCE"
     assert equals_none_result.severity == "C2"
+
+
+@pytest.mark.parametrize("value", ["", [], {}])
+def test_exists_rejects_empty_values(engine: AssertionEngine, value: object) -> None:
+    result = engine.evaluate(
+        AssertionSpec(
+            assertion_id="non-empty-answer",
+            source="answer",
+            operator="exists",
+            path="text",
+        ),
+        observation={"answer": {"text": value}},
+    )
+
+    assert result.passed is False
+    assert result.kind == "assertion_failed"
 
 
 def test_unchanged_requires_before_and_after_snapshots(engine: AssertionEngine) -> None:

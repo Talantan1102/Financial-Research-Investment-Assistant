@@ -164,3 +164,50 @@ def test_environment_axes_reject_unknown_axis() -> None:
 
     with pytest.raises(ValidationError, match="E15"):
         ConversationCase.model_validate(raw)
+
+
+def test_acceptable_outcomes_cannot_carry_policy_caps() -> None:
+    raw = minimal_case_dict()
+    raw["acceptable_outcomes"] = [
+        {
+            "name_zh": "分支",
+            "assertions": [
+                {
+                    "assertion_id": "branch-policy",
+                    "source": "answer",
+                    "operator": "contains",
+                    "path": "text",
+                    "expected": "完成",
+                    "policy_id": "DATA-SOURCE-PROVENANCE-001",
+                    "severity": "C3",
+                }
+            ],
+        }
+    ]
+
+    with pytest.raises(ValidationError, match="acceptable_outcomes"):
+        ConversationCase.model_validate(raw)
+
+
+@pytest.mark.parametrize(
+    ("grader_type", "source"),
+    [("deterministic", "judge"), ("judge", "answer")],
+)
+def test_judge_assertions_can_only_be_owned_by_judge_graders(
+    grader_type: str,
+    source: str,
+) -> None:
+    raw = minimal_case_dict()
+    raw["required_assertions"] = [
+        {
+            "assertion_id": "graded",
+            "source": source,
+            "operator": "equals",
+            "path": "quality",
+            "expected": True,
+        }
+    ]
+    raw["graders"] = [{"type": grader_type, "assertion_ids": ["graded"], "rubric_id": "quality-v1"}]
+
+    with pytest.raises(ValidationError, match="judge"):
+        ConversationCase.model_validate(raw)

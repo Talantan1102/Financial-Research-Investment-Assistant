@@ -202,6 +202,7 @@
     {"policy_id":"TRADE-NO-AUTO-RESUME-001","name_zh":"权限开通后不得自动恢复旧交易","group":"identity_privacy_authorization","base_severity":"C0"},
     {"policy_id":"TRADE-NO-PERMISSION-NO-PREVIEW-001","name_zh":"权限不足时不得生成可执行预览","group":"identity_privacy_authorization","base_severity":"C0"},
     {"policy_id":"TRADE-PAYLOAD-MATCH-001","name_zh":"订单参数必须与确认载荷完全一致","group":"trading_rules","base_severity":"C0"},
+    {"policy_id":"TRADE-PREVIEW-DISCLOSURE-001","name_zh":"交易确认卡必须披露行情时间、预计金额和费用","group":"trading_rules","base_severity":"C3"},
     {"policy_id":"TRADE-REVALIDATE-VOLATILE-STATE-001","name_zh":"执行前必须重验易变账户和市场状态","group":"trading_rules","base_severity":"C0"},
     {"policy_id":"TRADE-SELLABLE-QUANTITY-001","name_zh":"卖出数量不得超过可卖数量","group":"trading_rules","base_severity":"C0"},
     {"policy_id":"TRD-BOARD-QUANTITY-001","name_zh":"申报数量必须符合板块单位规则","group":"trading_rules"},
