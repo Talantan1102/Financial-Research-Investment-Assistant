@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
@@ -24,6 +25,8 @@ FaultMode = Literal[
     "approval_pause",
     "approval_delay",
     "suspended_quote",
+    "response_lost_after_commit",
+    "duplicate_approval_resume",
 ]
 
 
@@ -60,11 +63,11 @@ class FaultPlan:
 class TransportFaultPlan:
     """Faults around durable HTTP actions, never inside production services."""
 
-    response_lost_after_commit: bool = False
+    duplicate_approval_resume: bool = False
 
     @property
-    def retry_policy(self) -> Literal["normal", "observe_before_retry"]:
-        return "observe_before_retry" if self.response_lost_after_commit else "normal"
+    def retry_policy(self) -> Literal["normal"]:
+        return "normal"
 
 
 class FaultToolResult(ToolResult):
@@ -79,11 +82,18 @@ class FaultInjectingHub:
     def __init__(self, inner: ToolHubLike, plans: list[FaultPlan]) -> None:
         self._inner = inner
         self._plans = tuple(plans)
+        self._matched_attempts = [0 for _plan in self._plans]
         dedicated_modes = sorted(
             {
                 plan.mode
                 for plan in self._plans
-                if plan.mode in {"approval_pause", "approval_delay", "suspended_quote"}
+                if plan.mode
+                in {
+                    "approval_pause",
+                    "approval_delay",
+                    "suspended_quote",
+                    "duplicate_approval_resume",
+                }
             }
         )
         if dedicated_modes:
@@ -98,17 +108,13 @@ class FaultInjectingHub:
         unsupported = sorted({plan.target for plan in self._plans} - known_targets)
         if unsupported:
             raise ValueError(f"unsupported fault target(s): {unsupported}")
-        scenario_specific = sorted(
-            {
-                plan.mode
-                for plan in self._plans
-                if plan.mode == "conflict" and not _is_watchlist_duplicate_add_verification(plan)
-            }
-        )
+        scenario_specific = sorted({plan.mode for plan in self._plans if plan.mode == "conflict"})
         if scenario_specific:
             raise ValueError(
                 f"scenario-specific fault mode requires a dedicated hook: {scenario_specific}"
             )
+        for plan in self._plans:
+            _validate_fault_selectors(plan)
 
     def schemas_for_llm(self) -> list[dict[str, Any]]:
         return self._inner.schemas_for_llm()
@@ -124,12 +130,30 @@ class FaultInjectingHub:
         results: list[ToolResult | None] = [None] * len(calls)
         forwarded: list[StepToolCall] = []
         forwarded_indices: list[int] = []
+        post_commit_faults: dict[int, FaultPlan] = {}
 
         for index, call in enumerate(calls):
-            plan = next((item for item in self._plans if item.target == call.name), None)
-            if plan is None or _is_watchlist_duplicate_add_verification(plan):
+            plan: FaultPlan | None = None
+            for plan_index, candidate in enumerate(self._plans):
+                if candidate.target != call.name:
+                    continue
+                if not _arguments_match(
+                    call.parsed_args,
+                    candidate.payload.get("match_arguments", {}),
+                ):
+                    continue
+                self._matched_attempts[plan_index] += 1
+                if _attempt_is_selected(candidate, self._matched_attempts[plan_index]):
+                    plan = candidate
+                    break
+            if plan is None:
                 forwarded.append(call)
                 forwarded_indices.append(index)
+                continue
+            if plan.mode == "response_lost_after_commit":
+                forwarded.append(call)
+                forwarded_indices.append(index)
+                post_commit_faults[index] = plan
                 continue
             if plan.mode in {"timeout", "error"}:
                 results[index] = _failed_result(call, plan)
@@ -141,21 +165,43 @@ class FaultInjectingHub:
             if len(inner_results) != len(forwarded):
                 raise RuntimeError("fault-decorated ToolHub returned misaligned results")
             for index, result in zip(forwarded_indices, inner_results, strict=True):
-                results[index] = result
+                plan = post_commit_faults.get(index)
+                results[index] = (
+                    _lost_after_commit_result(calls[index], result, plan)
+                    if plan is not None and result.success
+                    else result
+                )
 
         if any(result is None for result in results):
             raise RuntimeError("fault decorator failed to produce one result per tool call")
         return [result for result in results if result is not None]
 
 
-def _is_watchlist_duplicate_add_verification(plan: FaultPlan) -> bool:
-    return (
-        plan.mode == "conflict"
-        and plan.target == "manage_watchlist"
-        and set(plan.payload) == {"kind", "same_payload"}
-        and plan.payload["kind"] == "duplicate_add"
-        and plan.payload["same_payload"] is True
-    )
+def _validate_fault_selectors(plan: FaultPlan) -> None:
+    match_arguments = plan.payload.get("match_arguments", {})
+    if not isinstance(match_arguments, Mapping):
+        raise ValueError("fault match_arguments must be an object")
+    attempts = plan.payload.get("apply_on_attempts")
+    if attempts is None:
+        return
+    if (
+        not isinstance(attempts, Sequence)
+        or isinstance(attempts, (str, bytes, bytearray))
+        or not attempts
+        or any(type(value) is not int or value < 1 for value in attempts)
+    ):
+        raise ValueError("fault apply_on_attempts must contain positive integers")
+
+
+def _arguments_match(actual: Mapping[str, Any], expected: Any) -> bool:
+    if not isinstance(expected, Mapping):
+        return False
+    return all(key in actual and actual[key] == value for key, value in expected.items())
+
+
+def _attempt_is_selected(plan: FaultPlan, attempt: int) -> bool:
+    selected = plan.payload.get("apply_on_attempts")
+    return selected is None or attempt in selected
 
 
 class DeterministicBarrier:
@@ -212,6 +258,30 @@ def _stale_result(call: StepToolCall, plan: FaultPlan) -> ToolResult:
         error=None,
         latency_ms=0,
         tool_call_data={"fault_injected": True, "fault_mode": "stale"},
+    )
+
+
+def _lost_after_commit_result(
+    call: StepToolCall,
+    committed: ToolResult,
+    plan: FaultPlan,
+) -> FaultToolResult:
+    message = str(
+        plan.payload.get("message") or "tool response was lost after the production write committed"
+    )
+    return FaultToolResult(
+        tool_name=call.name,
+        args=call.parsed_args,
+        success=False,
+        output=None,
+        error=f"[response_lost_after_commit] {message}",
+        latency_ms=committed.latency_ms,
+        tool_call_data={
+            "fault_injected": True,
+            "fault_mode": "response_lost_after_commit",
+            "committed_result_observed_by_evaluator": committed.output,
+        },
+        error_code="response_lost_after_commit",
     )
 
 

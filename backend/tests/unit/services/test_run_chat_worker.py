@@ -4,10 +4,13 @@ import asyncio
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
+from app.chatloop.contracts import ToolResult
 from app.chatloop.run_executor import CompletedResult, ExecuteChatRun, FailedResult, RunUsage
 from app.chatloop.state import ChatLoopState
 from app.services.attempt_service import (
@@ -19,12 +22,50 @@ from app.services.llm_step import StepToolCall
 from app.services.run_chat_worker import (
     ContinuationKeyring,
     DurableApprovalController,
+    PersistentToolLedger,
     RunChatWorker,
     ToolRiskPolicy,
     load_continuation_keyring,
     load_tool_risk_policy,
     resolve_llm_identity,
 )
+
+
+class _CodedToolResult(ToolResult):
+    error_code: str
+
+
+@pytest.mark.asyncio
+async def test_persistent_tool_ledger_preserves_specific_failure_code() -> None:
+    attempts = SimpleNamespace(fail_tool_execution=AsyncMock())
+    assignment = SimpleNamespace()
+    ledger = PersistentToolLedger(attempts, assignment)
+    reservation = SimpleNamespace(
+        idempotency_key="call-1",
+        reservation_token="reservation-1",
+        execution_epoch=2,
+    )
+    result = _CodedToolResult(
+        tool_name="get_stock_quote",
+        args={"ts_code": "000001.SZ"},
+        success=False,
+        output=None,
+        error="[timeout] unavailable",
+        latency_ms=0,
+        tool_call_data={"fault_injected": True},
+        error_code="timeout",
+    )
+
+    await ledger.fail(reservation, result)
+
+    attempts.fail_tool_execution.assert_awaited_once_with(
+        assignment,
+        "call-1",
+        error_code="timeout",
+        error_message="[timeout] unavailable",
+        reservation_token="reservation-1",
+        execution_epoch=2,
+    )
 
 
 @dataclass

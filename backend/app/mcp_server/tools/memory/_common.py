@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 # long-lived stdio process; without this, connections accumulate indefinitely.
 _MEMORY_INSTANCE: Any = None
 _MEMORY_LOCK = threading.Lock()
+_MILVUS_FROM_ENV = object()
 
 
 def get_memory() -> Any:
@@ -46,7 +47,12 @@ def get_memory() -> Any:
     return _MEMORY_INSTANCE
 
 
-def build_memory_from_env() -> Any:
+def build_memory_from_env(
+    *,
+    pg_session_factory: Any | None = None,
+    milvus_client: Any = _MILVUS_FROM_ENV,
+    collection_name: str | None = None,
+) -> Any:
     """Construct a HierarchicalMemory using factory wiring from env.
 
     Returns a HierarchicalMemory; AGE / Milvus / LLM judge wiring is best-effort
@@ -85,27 +91,39 @@ def build_memory_from_env() -> Any:
     # `_wait_for_channel_ready`(pymilvus 默认无连接超时),使下面的 try/except 兜底
     # 形同虚设 —— eval/离线场景(Milvus 没起)会让 build_heavy_singletons 永久挂死。
     # 先用一个短超时 TCP 探针判活:端口未监听则立即 ECONNREFUSED → 落 except → None。
-    milvus_client: Any = None
-    host = os.environ.get("MILVUS_HOST", "127.0.0.1")
-    port = int(os.environ.get("MILVUS_PORT", "19530"))
-    try:
-        import socket
+    selected_milvus = milvus_client
+    if selected_milvus is _MILVUS_FROM_ENV:
+        selected_milvus = None
+        host = os.environ.get("MILVUS_HOST", "127.0.0.1")
+        port = int(os.environ.get("MILVUS_PORT", "19530"))
+        try:
+            import socket
 
-        with socket.create_connection((host, port), timeout=2):
-            pass
-        from pymilvus import MilvusClient
+            with socket.create_connection((host, port), timeout=2):
+                pass
+            from pymilvus import MilvusClient
 
-        milvus_client = MilvusClient(uri=f"http://{host}:{port}")
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("memory MCP: Milvus unavailable (%s) — 记忆降级无向量检索", exc)
+            selected_milvus = MilvusClient(uri=f"http://{host}:{port}")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "memory MCP: Milvus unavailable (%s) — 记忆降级无向量检索",
+                exc,
+            )
+
+    selected_collection = (
+        collection_name
+        or os.environ.get("CHAT_MEMORY_COLLECTION_NAME")
+        or "chat_memory_edge_embeddings"
+    )
 
     return HierarchicalMemory(
-        pg_session_factory=SessionLocal,
+        pg_session_factory=pg_session_factory or SessionLocal,
         age_executor=None,  # AGE wiring deferred; archival_memory_traverse falls back to []
-        milvus_client=milvus_client,
+        milvus_client=selected_milvus,
         embed_service=embed,
         llm_extractor=llm_extractor,
         llm_judge=llm_judge,
+        collection_name=selected_collection,
     )
 
 

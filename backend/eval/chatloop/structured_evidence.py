@@ -8,6 +8,7 @@ import json
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, StrictBool, model_validator
@@ -241,6 +242,9 @@ class BusinessStructuredEvidenceProvider:
             raise InvalidEvidenceError("transcript has no assistant answer")
 
         domain_evidence = _project_market_evidence(raw.tool_ledger)
+        portfolio_concentration = _project_portfolio_concentration(result.database_before_after)
+        if portfolio_concentration is not None:
+            domain_evidence["portfolio_concentration"] = portfolio_concentration
         projects_stock_quote = "get_stock_quote" in case.available_tools or any(
             row.get("tool_name") == "get_stock_quote" for row in raw.tool_ledger
         )
@@ -383,6 +387,68 @@ def _project_market_evidence(ledger: Sequence[Mapping[str, Any]]) -> dict[str, A
     if provenance:
         evidence["provenance"] = provenance
     return evidence
+
+
+def _project_portfolio_concentration(
+    database_before_after: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    before = database_before_after.get("before")
+    if not isinstance(before, Mapping):
+        return None
+    positions = before.get("positions")
+    if not isinstance(positions, Mapping):
+        return None
+    records = positions.get("records")
+    if not isinstance(records, Sequence) or isinstance(records, (str, bytes, bytearray)):
+        return None
+    if not records:
+        return None
+
+    valued_positions: list[tuple[str, Decimal]] = []
+    for record in records:
+        if not isinstance(record, Mapping):
+            return None
+        ts_code = record.get("ts_code")
+        market_value = record.get("market_value")
+        if not isinstance(ts_code, str) or market_value is None:
+            return None
+        try:
+            value = Decimal(str(market_value))
+        except (InvalidOperation, ValueError):
+            return None
+        if not value.is_finite() or value < 0:
+            return None
+        valued_positions.append((ts_code, value))
+
+    total_market_value = sum((value for _, value in valued_positions), Decimal("0"))
+    if total_market_value <= 0:
+        return None
+
+    ranked_positions = sorted(
+        (
+            (market_value / total_market_value, ts_code, market_value)
+            for ts_code, market_value in valued_positions
+        ),
+        key=lambda item: (-item[0], item[1]),
+    )
+    weighted_positions = [
+        {
+            "ts_code": ts_code,
+            "market_value": float(market_value),
+            "weight": float(weight),
+        }
+        for weight, ts_code, market_value in ranked_positions
+    ]
+    weights = [float(weight) for weight, _, _ in ranked_positions]
+    hhi = sum((market_value / total_market_value) ** 2 for _, market_value in valued_positions)
+    return {
+        "source_path": "database.before.positions.records",
+        "total_market_value": float(total_market_value),
+        "weights": weights,
+        "weighted_positions": weighted_positions,
+        "max_weight": max(weights),
+        "hhi": float(hhi),
+    }
 
 
 def _without_unproven_market_facts(raw: Mapping[str, Any]) -> dict[str, Any]:

@@ -10,6 +10,7 @@ import re
 import time
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal, Protocol
 from uuid import UUID
@@ -30,6 +31,21 @@ from eval.chatloop.faults import (
 )
 
 TrialStatus = Literal["valid", "harness_failed", "invalid_evidence"]
+
+_DURABLE_TOOL_FAULT_PLANS: ContextVar[tuple[FaultPlan, ...]] = ContextVar(
+    "chatloop_eval_durable_tool_fault_plans",
+    default=(),
+)
+
+
+def current_durable_tool_fault_plans() -> tuple[FaultPlan, ...]:
+    """Return evaluator-owned tool faults active for the current durable attempt."""
+
+    return tuple(
+        plan
+        for plan in _DURABLE_TOOL_FAULT_PLANS.get()
+        if plan.mode not in {"approval_pause", "approval_delay", "suspended_quote"}
+    )
 
 
 @dataclass(slots=True)
@@ -117,12 +133,24 @@ class BusinessRunner:
                 fault_plans=tuple(
                     FaultPlan(target=item.target, mode=item.mode, payload=dict(item.payload))
                     for item in case.fault_injection
-                    if item.mode != "response_lost_after_commit"
+                    if item.mode
+                    not in {
+                        "response_lost_after_commit",
+                        "duplicate_approval_resume",
+                    }
+                    or (
+                        item.mode == "response_lost_after_commit"
+                        and case.initial_state.execution_mode == "direct"
+                    )
                 ),
                 transport_fault=TransportFaultPlan(
-                    response_lost_after_commit=any(
-                        item.mode == "response_lost_after_commit" for item in case.fault_injection
-                    )
+                    duplicate_approval_resume=(
+                        case.initial_state.execution_mode == "durable"
+                        and any(
+                            item.mode == "duplicate_approval_resume"
+                            for item in case.fault_injection
+                        )
+                    ),
                 ),
                 barrier=DeterministicBarrier(),
                 random_seed=random_seed,
@@ -132,7 +160,7 @@ class BusinessRunner:
         except asyncio.CancelledError as exc:
             cancellation = exc
         except Exception as exc:  # noqa: BLE001 - harness failures are trial facts
-            failures.append(f"execution: {type(exc).__name__}: {exc}")
+            failures.append(f"execution: {_format_exception(exc)}")
 
         if cancellation is None:
             try:
@@ -161,6 +189,16 @@ class BusinessRunner:
             environment_manifest=manifest,
             duration_ms=max(0, int((time.perf_counter() - started) * 1000)),
         )
+
+
+def _format_exception(error: BaseException) -> str:
+    """Keep nested TaskGroup causes visible in persisted harness evidence."""
+
+    rendered = f"{type(error).__name__}: {error}"
+    if isinstance(error, BaseExceptionGroup):
+        children = "; ".join(_format_exception(child) for child in error.exceptions)
+        return f"{rendered} [{children}]"
+    return rendered
 
 
 class DurableHttpBusinessExecutor:
@@ -197,18 +235,22 @@ class DurableHttpBusinessExecutor:
             progress_callback=self._progress_callback,
             approval_pause_callback=pause_callback,
         )
-        async with _suspended_quote_scope(context):
-            observed = await transport.execute_messages(
-                case_id=context.case.case_id,
-                messages=_render_environment_messages(
-                    context.case.user_messages,
-                    context.environment.manifest.order_aliases,
-                    order_alias_owners=context.environment.manifest.order_alias_owners,
-                    requester_user_id=context.actor.user_id,
-                ),
-                run_idx=context.environment.trial_index,
-                response_lost_after_commit=(context.transport_fault.response_lost_after_commit),
-            )
+        fault_token = _DURABLE_TOOL_FAULT_PLANS.set(context.fault_plans)
+        try:
+            async with _suspended_quote_scope(context):
+                observed = await transport.execute_messages(
+                    case_id=context.case.case_id,
+                    messages=_render_environment_messages(
+                        context.case.user_messages,
+                        context.environment.manifest.order_aliases,
+                        order_alias_owners=context.environment.manifest.order_alias_owners,
+                        requester_user_id=context.actor.user_id,
+                    ),
+                    run_idx=context.environment.trial_index,
+                    duplicate_approval_resume=(context.transport_fault.duplicate_approval_resume),
+                )
+        finally:
+            _DURABLE_TOOL_FAULT_PLANS.reset(fault_token)
         ledger = tuple(
             {
                 "tool_name": call.get("tool_name", "unknown"),
@@ -221,6 +263,10 @@ class DurableHttpBusinessExecutor:
                 "permission_decision": call.get("permission_decision"),
                 "permission_decisions": call.get("permission_decisions", []),
                 "idempotency_key": call.get("tool_call_id"),
+                "fault_injection": _durable_fault_provenance(
+                    call.get("result_summary"),
+                    call.get("error_code"),
+                ),
             }
             for call in observed.tool_calls
         )
@@ -238,6 +284,21 @@ class DurableHttpBusinessExecutor:
             cost_cny=observed.cost_cny,
             total_tokens=observed.total_tokens,
         )
+
+
+def _durable_fault_provenance(
+    result_summary: Any,
+    error_code: Any,
+) -> dict[str, Any] | None:
+    if isinstance(result_summary, dict):
+        data = result_summary.get("tool_call_data")
+        if isinstance(data, dict) and data.get("fault_injected") is True:
+            mode = data.get("fault_mode")
+            if isinstance(mode, str) and mode:
+                return {"injected": True, "mode": mode}
+    if error_code in {"timeout", "error", "response_lost_after_commit"}:
+        return {"injected": True, "mode": error_code}
+    return None
 
 
 _ORDER_ID_PLACEHOLDER = re.compile(r"\{\{order_id:([A-Za-z0-9][A-Za-z0-9._-]{0,63})\}\}")
@@ -464,11 +525,13 @@ class DirectToolLoopBusinessExecutor:
         *,
         sync_session_factory: Any,
         subprocess_env: dict[str, str],
+        memory: Any,
         max_steps: int = 6,
     ) -> None:
         self._session_factory = session_factory
         self._sync_session_factory = sync_session_factory
         self._subprocess_env = dict(subprocess_env)
+        self._memory = memory
         self._max_steps = max_steps
 
     async def execute(self, context: BusinessExecutionContext) -> BusinessObservation:
@@ -505,10 +568,7 @@ class DirectToolLoopBusinessExecutor:
                 session_factory=self._session_factory,
                 sync_session_factory=self._sync_session_factory,
                 mcp_client=mcp_client,
-                # Memory-bearing cases fail capability preflight until run-scoped
-                # Milvus exists. Never let ordinary direct cases initialize the
-                # application's global PG/Milvus memory singleton.
-                memory=object(),
+                memory=self._memory,
             )
             for turn_index, message in enumerate(context.case.user_messages):
                 transcript.append({"role": "user", "content": message})
@@ -621,6 +681,7 @@ def extract_business_tool_ledger(
         if message.get("role") == "tool" and message.get("tool_call_id")
     }
     rows: list[dict[str, Any]] = []
+    fault_attempts = [0 for _plan in fault_plans]
     for message in state.messages:
         if message.get("role") != "assistant":
             continue
@@ -637,6 +698,20 @@ def extract_business_tool_ledger(
             except (TypeError, ValueError, json.JSONDecodeError):
                 arguments = {}
             content = responses.get(call_id)
+            plan: FaultPlan | None = None
+            for plan_index, candidate in enumerate(fault_plans):
+                if candidate.target != name:
+                    continue
+                expected_arguments = candidate.payload.get("match_arguments", {})
+                if not isinstance(expected_arguments, dict) or not all(
+                    arguments.get(key) == value for key, value in expected_arguments.items()
+                ):
+                    continue
+                fault_attempts[plan_index] += 1
+                selected_attempts = candidate.payload.get("apply_on_attempts")
+                if selected_attempts is None or fault_attempts[plan_index] in selected_attempts:
+                    plan = candidate
+                    break
             result: Any = None
             error: str | None = None
             status: str | None = None
@@ -650,6 +725,13 @@ def extract_business_tool_ledger(
                 error = content.removeprefix("[ERROR]").strip() or "unknown tool error"
                 status = "failed"
                 error_code = "tool_error"
+                encoded_fault = re.match(r"^\[([a-z_]+)\](?:\s|$)", error)
+                if (
+                    plan is not None
+                    and encoded_fault is not None
+                    and encoded_fault.group(1) == plan.mode
+                ):
+                    error_code = encoded_fault.group(1)
                 error_message = error
             else:
                 try:
@@ -673,7 +755,6 @@ def extract_business_tool_ledger(
                         "error_message": error_message,
                     }
                 )
-            plan = next((item for item in fault_plans if item.target == name), None)
             if plan is not None:
                 row["fault_injection"] = {
                     "injected": True,

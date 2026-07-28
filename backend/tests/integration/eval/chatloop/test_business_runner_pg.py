@@ -120,7 +120,7 @@ async def test_cross_user_case_executes_as_requester_without_owner_visibility(
                 "count"
             ] == 0
             assert (await context.environment.snapshot(actor_name="owner"))["orders"]["count"] == 1
-            assert context.fault_plans[0].mode == "conflict"
+            assert context.fault_plans == ()
             return await super().execute(context)
 
     direct_case = _case("B7-16").model_copy(
@@ -136,6 +136,8 @@ async def test_cross_user_case_executes_as_requester_without_owner_visibility(
     )
 
     assert result.trial_status == "valid"
+    assert result.database_before_after["before"]["orders"]["count"] == 0
+    assert result.database_before_after["after"]["orders"]["count"] == 0
 
 
 @pytest.mark.asyncio

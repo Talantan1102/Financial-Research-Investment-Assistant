@@ -40,6 +40,7 @@ from eval.chatloop.business_runner import (
     BusinessTrialResult,
     DurableHttpBusinessExecutor,
     _suspended_quote_scope,
+    current_durable_tool_fault_plans,
 )
 from eval.chatloop.case_loader import load_catalog
 from eval.chatloop.disposable_runtime import (
@@ -49,7 +50,12 @@ from eval.chatloop.disposable_runtime import (
 )
 from eval.chatloop.durable_runtime import InProcessDurableDriver
 from eval.chatloop.environment import CaseEnvironmentManager
-from eval.chatloop.faults import DeterministicBarrier, FaultPlan, TransportFaultPlan
+from eval.chatloop.faults import (
+    DeterministicBarrier,
+    FaultInjectingHub,
+    FaultPlan,
+    TransportFaultPlan,
+)
 from eval.chatloop.policy_registry import PolicyRegistry
 from eval.chatloop.structured_evidence import BusinessStructuredEvidenceProvider
 from eval.chatloop.sut_runner import DurableRunHttpTransport
@@ -1091,7 +1097,10 @@ async def test_b7_cancel_real_durable_chain_exposes_resume_capability_gap(
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("case_id", "llm_factory"),
-    (("B6-10", _B610ScriptedLLM), ("B6-18", _B618ScriptedLLM)),
+    (
+        ("B6-10", _B610ScriptedLLM),
+        ("B6-18", _B618ScriptedLLM),
+    ),
 )
 async def test_b6_risk_gap_real_durable_chain_fails_on_product_behavior_not_harness(
     pg_test_container: dict[str, object],
@@ -1163,7 +1172,11 @@ async def test_b6_risk_gap_real_durable_chain_fails_on_product_behavior_not_harn
                 FaultPlan(target=item.target, mode=item.mode, payload=dict(item.payload))
                 for item in case.fault_injection
             ),
-            transport_fault=TransportFaultPlan(),
+            transport_fault=TransportFaultPlan(
+                duplicate_approval_resume=any(
+                    item.mode == "duplicate_approval_resume" for item in case.fault_injection
+                )
+            ),
             barrier=DeterministicBarrier(),
             execution_id=f"{case_id.lower()}-production-chain",
         )
@@ -1327,6 +1340,10 @@ async def test_lazy_driver_runs_real_chatloop_stack_and_projects_trace_observati
             provider="scripted",
             model="scripted-v1",
             risk_policy=ToolRiskPolicy.from_trusted_names({"memory_search", "read_cached_result"}),
+            tool_hub_decorator=lambda hub: FaultInjectingHub(
+                hub,
+                list(current_durable_tool_fault_plans()),
+            ),
         )
 
         async def cleanup() -> None:
@@ -1358,7 +1375,17 @@ async def test_lazy_driver_runs_real_chatloop_stack_and_projects_trace_observati
         case=case,
         environment=environment,
         actor=actor,
-        fault_plans=(),
+        fault_plans=(
+            FaultPlan(
+                target="memory_search",
+                mode="stale",
+                payload={
+                    "match_arguments": {"query": "position"},
+                    "apply_on_attempts": [1],
+                    "output": {"answer": "stale position"},
+                },
+            ),
+        ),
         transport_fault=TransportFaultPlan(),
         barrier=DeterministicBarrier(),
         execution_id="durable-chatloop-integration",
@@ -1385,7 +1412,7 @@ async def test_lazy_driver_runs_real_chatloop_stack_and_projects_trace_observati
         assert ledger["memory_search"] == {
             "tool_name": "memory_search",
             "arguments": {"query": "position"},
-            "result": {"answer": "position"},
+            "result": {"answer": "stale position"},
             "error": None,
             "status": "completed",
             "error_code": None,
@@ -1393,6 +1420,7 @@ async def test_lazy_driver_runs_real_chatloop_stack_and_projects_trace_observati
             "permission_decision": "direct",
             "permission_decisions": ["direct"],
             "idempotency_key": "call-success",
+            "fault_injection": {"injected": True, "mode": "stale"},
         }
         assert ledger["read_cached_result"]["arguments"] == {"query": "missing"}
         assert ledger["read_cached_result"]["result"] is None
@@ -1400,6 +1428,7 @@ async def test_lazy_driver_runs_real_chatloop_stack_and_projects_trace_observati
         assert ledger["read_cached_result"]["error_code"] == "tool_error"
         assert "forced failure for missing" in ledger["read_cached_result"]["error"]
         assert ledger["read_cached_result"]["permission_decisions"] == ["direct"]
+        assert ledger["read_cached_result"]["fault_injection"] is None
         run_id = UUID(observation.run_state["run_ids"][0])
         async with runtime.async_session_factory() as session:
             run = await session.get(Run, run_id)

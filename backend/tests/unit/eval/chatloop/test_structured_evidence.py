@@ -84,6 +84,7 @@ def _result(
     ledger: tuple[dict[str, Any], ...] | None = None,
     assistant_text: str = "clear answer",
     raw_evidence: dict[str, Any] | None = None,
+    database_before_after: dict[str, Any] | None = None,
 ) -> BusinessTrialResult:
     return BusinessTrialResult(
         case_id="B1-99",
@@ -113,10 +114,14 @@ def _result(
             cost_cny=0.3,
             total_tokens=50,
         ),
-        database_before_after={
-            "before": {"orders": {"count": 0}},
-            "after": {"orders": {"count": 0}},
-        },
+        database_before_after=(
+            database_before_after
+            if database_before_after is not None
+            else {
+                "before": {"orders": {"count": 0}},
+                "after": {"orders": {"count": 0}},
+            }
+        ),
         environment_manifest={"database": "isolated"},
         duration_ms=12,
     )
@@ -454,6 +459,64 @@ async def test_deterministic_projection_builds_answer_tool_run_and_database_sour
     }
     assert evidence["database"]["before"] == {"orders": {"count": 0}}
     assert evidence["evidence"]["versions"] == {"model": "fake", "policy": "v1"}
+
+
+@pytest.mark.asyncio
+async def test_portfolio_concentration_is_derived_from_before_market_values() -> None:
+    assertions = [
+        AssertionSpec(
+            assertion_id="weights",
+            source="evidence",
+            operator="equals",
+            path="portfolio_concentration.weights",
+            expected=[0.6, 0.25, 0.15],
+        ),
+        AssertionSpec(
+            assertion_id="max-weight",
+            source="evidence",
+            operator="equals",
+            path="portfolio_concentration.max_weight",
+            expected=0.6,
+        ),
+        AssertionSpec(
+            assertion_id="hhi",
+            source="evidence",
+            operator="equals",
+            path="portfolio_concentration.hhi",
+            expected=0.445,
+        ),
+    ]
+    provider = BusinessStructuredEvidenceProvider(
+        versions={"model": "fake"}, semantic_judge=FakeJudge([])
+    )
+    database = {
+        "before": {
+            "positions": {
+                "count": 3,
+                "records": [
+                    {"ts_code": "600519.SH", "total_cost": "1.00", "market_value": "600000.00"},
+                    {"ts_code": "600036.SH", "total_cost": "2.00", "market_value": "250000.00"},
+                    {"ts_code": "300750.SZ", "total_cost": "3.00", "market_value": "150000.00"},
+                ],
+            }
+        },
+        "after": {"positions": {"count": 3, "records": []}},
+    }
+
+    evidence = await provider.build(_case(assertions), _result(database_before_after=database))
+
+    assert evidence["evidence"]["portfolio_concentration"] == {
+        "source_path": "database.before.positions.records",
+        "total_market_value": 1000000.0,
+        "weights": [0.6, 0.25, 0.15],
+        "weighted_positions": [
+            {"ts_code": "600519.SH", "market_value": 600000.0, "weight": 0.6},
+            {"ts_code": "600036.SH", "market_value": 250000.0, "weight": 0.25},
+            {"ts_code": "300750.SZ", "market_value": 150000.0, "weight": 0.15},
+        ],
+        "max_weight": 0.6,
+        "hhi": 0.445,
+    }
 
 
 @pytest.mark.asyncio
@@ -1402,17 +1465,34 @@ async def test_b2_10_catalog_reads_stale_inputs_from_real_tool_ledger() -> None:
                 "tool_name": "get_financial_statements",
                 "arguments": {
                     "ts_code": "600519.SH",
-                    "statement": "income",
+                },
+                "result": {
+                    "ts_code": "600519.SH",
+                    "period": "annual",
+                    "end_date": "20241231",
+                    "ann_date": "20250331",
+                    "roe": 31,
+                },
+                "status": "completed",
+                "error": None,
+                "idempotency_key": "financial-1",
+            },
+            {
+                "tool_name": "get_financial_statements",
+                "arguments": {
+                    "ts_code": "600519.SH",
                     "end_date": "20231231",
                 },
                 "result": {
                     "ts_code": "600519.SH",
-                    "report_period": "2024-12-31",
-                    "published_at": "2025-03-31",
-                    "roe": 31.0,
+                    "period": "annual",
+                    "end_date": "20231231",
+                    "ann_date": "20240402",
+                    "roe": 30,
                 },
+                "status": "completed",
                 "error": None,
-                "idempotency_key": "financial-1",
+                "idempotency_key": "financial-2",
             },
             {
                 "tool_name": "get_market_indicators",
@@ -1424,11 +1504,41 @@ async def test_b2_10_catalog_reads_stale_inputs_from_real_tool_ledger() -> None:
                 "result": {
                     "ts_code": "600519.SH",
                     "metric": "daily_basic",
-                    "trade_date": "2026-06-30",
+                    "trade_date": "20240628",
                     "pe": 24.5,
                 },
+                "status": "completed",
                 "error": None,
                 "idempotency_key": "valuation-1",
+            },
+            {
+                "tool_name": "get_daily",
+                "arguments": {
+                    "ts_code": "600519.SH",
+                    "start": "20240701",
+                    "end": "20241231",
+                },
+                "result": {
+                    "ts_code": "600519.SH",
+                    "count": 2,
+                    "dates": ["20240701", "20241231"],
+                    "close": [1500, 1680],
+                },
+                "status": "completed",
+                "error": None,
+                "idempotency_key": "daily-1",
+            },
+            {
+                "tool_name": "run_python",
+                "arguments": {
+                    "source": "result = {'eligible': True, 'forward_return': 0.12}",
+                },
+                "result": {
+                    "result": {"eligible": True, "forward_return": 0.12},
+                },
+                "status": "completed",
+                "error": None,
+                "idempotency_key": "python-1",
             },
         ),
     )
@@ -1439,16 +1549,31 @@ async def test_b2_10_catalog_reads_stale_inputs_from_real_tool_ledger() -> None:
 
     evidence = await provider.build(case, result)
 
-    assert (
-        evidence["tools"]["get_financial_statements"]["last_call"]["result"]["published_at"]
-        == "2025-03-31"
+    assert evidence["tools"]["get_financial_statements"]["calls"][0]["result"]["ann_date"] == (
+        "20250331"
     )
+    assert evidence["tools"]["get_financial_statements"]["calls"][1]["result"] == {
+        "ts_code": "600519.SH",
+        "period": "annual",
+        "end_date": "20231231",
+        "ann_date": "20240402",
+        "roe": 30,
+    }
     assert (
         evidence["tools"]["get_market_indicators"]["last_call"]["result"]["trade_date"]
-        == "2026-06-30"
+        == "20240628"
     )
+    assert evidence["tools"]["get_daily"]["last_call"]["result"]["dates"] == [
+        "20240701",
+        "20241231",
+    ]
+    assert evidence["tools"]["run_python"]["last_call"]["status"] == "completed"
+    assert evidence["tools"]["run_python"]["last_call"]["result"]["result"] == {
+        "eligible": True,
+        "forward_return": 0.12,
+    }
     assert "business_rules" not in evidence["evidence"]
-    assert len(evidence["judge_audit"]) == 14
+    assert len(evidence["judge_audit"]) == 9
 
 
 @pytest.mark.asyncio

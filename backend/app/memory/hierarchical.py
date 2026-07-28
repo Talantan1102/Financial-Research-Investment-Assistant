@@ -63,6 +63,7 @@ class HierarchicalMemory:
         embed_cache: Any | None = None,
         prompt_cache_store: Any | None = None,
         persona_service: PersonaService | None = None,
+        collection_name: str = "chat_memory_edge_embeddings",
     ) -> None:
         self._pg_session_factory = pg_session_factory
         self._age = age_executor
@@ -70,6 +71,7 @@ class HierarchicalMemory:
         self._embed = embed_service
         self._llm_extractor = llm_extractor
         self._llm_judge = llm_judge
+        self._collection_name = collection_name
         self._injection_classifier = injection_classifier
         # Plan 5 cost optimization DI hooks (契约 § 9). 默认 None 保 Plan 1B 测试无破坏.
         self._embed_cache = embed_cache
@@ -477,6 +479,7 @@ class HierarchicalMemory:
                 embed_service=self._embed,
                 edge=new_edge,
                 edge_text=edge_text,
+                collection_name=self._collection_name,
             )
 
             # Step 8: mark episode extracted
@@ -579,6 +582,7 @@ class HierarchicalMemory:
                         user_id=user_id,
                         query=query,
                         k=k * 2,
+                        collection_name=self._collection_name,
                     )
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("archival_memory_search vector failed: %s", exc)

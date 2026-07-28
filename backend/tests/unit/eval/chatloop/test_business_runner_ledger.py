@@ -12,10 +12,24 @@ from app.services.paper_trading.errors import PaperTradingError
 from app.services.paper_trading.quote_provider import TushareRealtimeQuoteProvider
 from eval.chatloop.business_runner import (
     _approval_pause_callback,
+    _format_exception,
     _render_environment_messages,
     extract_business_tool_ledger,
 )
 from eval.chatloop.faults import FaultPlan
+
+
+def test_format_exception_preserves_nested_task_group_causes() -> None:
+    error = ExceptionGroup(
+        "worker task failed",
+        [RuntimeError("missing model credential"), TimeoutError("tool timed out")],
+    )
+
+    rendered = _format_exception(error)
+
+    assert "ExceptionGroup: worker task failed" in rendered
+    assert "RuntimeError: missing model credential" in rendered
+    assert "TimeoutError: tool timed out" in rendered
 
 
 def test_approval_pause_execution_guard_rejects_direct_case() -> None:
@@ -379,3 +393,42 @@ def test_extract_tool_ledger_records_eval_fault_provenance_without_changing_tool
         "mode": "stale",
         "target": "get_stock_quote",
     }
+
+
+def test_extract_tool_ledger_preserves_eval_fault_error_code() -> None:
+    state = ChatLoopState(
+        user_id="u",
+        session_id="s",
+        request_id="r",
+        messages=[
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "write-1",
+                        "type": "function",
+                        "function": {
+                            "name": "manage_watchlist",
+                            "arguments": '{"action":"add","ts_code":"002415.SZ"}',
+                        },
+                    }
+                ],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "write-1",
+                "content": (
+                    "[ERROR] [response_lost_after_commit] "
+                    "tool response was lost after the production write committed"
+                ),
+            },
+        ],
+    )
+
+    ledger = extract_business_tool_ledger(
+        state,
+        fault_plans=(FaultPlan(target="manage_watchlist", mode="response_lost_after_commit"),),
+    )
+
+    assert ledger[0]["error_code"] == "response_lost_after_commit"

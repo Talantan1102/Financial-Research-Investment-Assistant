@@ -101,6 +101,14 @@ async def test_structured_state_is_seeded_for_the_correct_actors(
     assert len(env.manifest.watchlist_item_ids) == 3
     assert len(env.manifest.position_ids) == 1
     creator_by_code = {row["ts_code"]: row for row in creator["watchlist"]["records"]}
+    assert creator["watchlist"]["by_code"]["600519_SH"] == creator_by_code["600519.SH"]
+    assert creator["watchlist_audits"] == {
+        "count": 0,
+        "records": [],
+        "latest_action": None,
+        "latest_ts_code": None,
+        "by_code": {},
+    }
     assert creator_by_code["600519.SH"] == {
         "id": creator_by_code["600519.SH"]["id"],
         "ts_code": "600519.SH",
@@ -565,7 +573,7 @@ async def test_b7_apply_order_fill_rejects_cross_user_even_if_manifest_owner_is_
     disposable_eval_async_session_factory,
 ) -> None:
     env = await environment_manager.prepare(_case("B7-16"), trial_index=0)
-    alias = "ord-b7-16-owner"
+    alias = "ord-b7-16-other"
     order_id = UUID(env.manifest.order_aliases[alias])
     owner_user_id = env.actor("owner").user_id
     requester_user_id = env.actor("requester").user_id

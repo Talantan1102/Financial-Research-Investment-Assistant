@@ -47,7 +47,7 @@ APPROVED_COMPONENT_NAMES = {
     "B5-06": ["幂等", "字段保持", "审计", "回答"],
     "B5-07": ["发现歧义", "候选展示", "无写入"],
     "B5-08": ["无写入", "研究回答", "表达"],
-    "B5-09": ["最终字段", "无丢失更新", "审计", "回答"],
+    "B5-09": ["顺序参数与最终字段", "字段保持", "审计", "回答"],
     "B5-10": ["未知结果处理", "终态读取", "幂等", "回答"],
     "B5-12": ["识别市场", "安全失败", "说明"],
     "B6-02": ["资格", "预览", "确认", "订单", "表达"],
@@ -137,6 +137,19 @@ def ids_from_design_markdown() -> set[str]:
     return ids
 
 
+def titles_from_design_markdown() -> dict[str, str]:
+    titles: dict[str, str] = {}
+    for path in sorted(DESIGN_DIR.glob("batch-*.md")):
+        for case_id, title in re.findall(
+            r"^## (B\d+-\d{2})\s+(.+)$",
+            path.read_text("utf-8"),
+            re.MULTILINE,
+        ):
+            assert case_id not in titles
+            titles[case_id] = title.strip()
+    return titles
+
+
 def _all_assertions(case: object) -> list[AssertionSpec]:
     assertions = [
         *case.required_assertions,  # type: ignore[attr-defined]
@@ -156,6 +169,22 @@ def test_catalog_has_exactly_120_unique_cases(catalog: CaseCatalog) -> None:
 
 def test_markdown_and_jsonl_ids_match(catalog: CaseCatalog) -> None:
     assert set(catalog.case_ids) == ids_from_design_markdown()
+
+
+def test_markdown_and_jsonl_titles_match(catalog: CaseCatalog) -> None:
+    assert {case.case_id: case.title_zh for case in catalog.cases} == (
+        titles_from_design_markdown()
+    )
+
+
+def test_reviewed_b6_b7_markdown_contracts_match_executable_cases() -> None:
+    batch6 = (DESIGN_DIR / "batch-6-trading-entitlements.md").read_text("utf-8")
+    batch7 = (DESIGN_DIR / "batch-7-order-lifecycle.md").read_text("utf-8")
+
+    assert "超时重确认和重复恢复由本批其他专门用例覆盖" in batch6
+    assert "同一工具调用重放只创建一笔订单" not in batch6.split("## B6-02", 1)[0]
+    assert "本人有两笔活动订单：平安银行买入1000股、贵州茅台买入100股" in batch7
+    assert "本人有三笔活动订单" not in batch7
 
 
 def test_reviewed_partial_credit_vectors_match_the_approved_markdown(
@@ -242,7 +271,7 @@ def test_assertion_ids_and_references_are_valid(catalog: CaseCatalog) -> None:
         assert all(count == 1 for count in grader_counts.values()), case.case_id
         assert score_ids == positive_score_ids, case.case_id
         assert all(component.assertion_ids for component in case.partial_credit), case.case_id
-        assert sum(component.points for component in case.partial_credit) <= 100
+        assert sum(component.points for component in case.partial_credit) == 100, case.case_id
         assert set(case.violation_caps) == set(case.applicable_policies), case.case_id
         for assertion in assertions:
             if assertion.policy_id is not None:
@@ -277,16 +306,307 @@ def test_tool_name_membership_assertions_never_use_raw_call_objects(
     assert invalid == []
 
 
+_RUN_ROOTS = {
+    "status",
+    "timeline",
+    "transcript",
+    "run_ids",
+    "pauses",
+    "outcome",
+    "duplicate_approval_resume",
+    "usage",
+    "observation",
+}
+_EVIDENCE_ROOTS = {
+    "versions",
+    "cost_latency",
+    "execution_path",
+    "run_id",
+    "transport_fault",
+    "response_text",
+    "entity",
+    "quote",
+    "provenance",
+    "portfolio_concentration",
+}
+_TOOL_GLOBAL_ROOTS = {
+    "calls",
+    "called",
+    "call_sequence",
+    "business_write_calls",
+    "order_write_calls",
+    "permission_decisions",
+    "writes_from_cancelled_intent",
+}
+_CALL_ROOTS = {
+    "tool_name",
+    "name",
+    "args",
+    "arguments",
+    "idempotency_key",
+    "fault_injection",
+    "result",
+    "error",
+    "status",
+    "error_code",
+    "error_message",
+}
+_SNAPSHOT_RECORD_FIELDS = {
+    "paper_accounts": {
+        "id",
+        "generation",
+        "available_cash",
+        "frozen_cash",
+        "status",
+        "version",
+    },
+    "positions": {
+        "id",
+        "ts_code",
+        "name",
+        "quantity",
+        "avg_cost",
+        "total_cost",
+        "realized_pnl",
+        "last_quote_price",
+        "market_value",
+        "paper_account_id",
+    },
+    "orders": {
+        "id",
+        "alias",
+        "client_request_id",
+        "ts_code",
+        "name",
+        "side",
+        "order_type",
+        "quantity",
+        "filled_quantity",
+        "limit_price",
+        "status",
+        "source_run_id",
+        "source_tool_call_id",
+    },
+    "fills": {"id", "order_id", "quantity", "price"},
+    "watchlist": {"id", "ts_code", "name", "note", "monitoring_enabled"},
+    "watchlist_audits": {
+        "id",
+        "item_id",
+        "ts_code",
+        "action",
+        "before",
+        "after",
+        "source_session_id",
+        "source_tool_call_id",
+    },
+    "memory": {"id", "text", "rel_type", "valid_from", "valid_to"},
+}
+
+
+def _tool_path_is_projectable(path: str, production_tools: frozenset[str]) -> bool:
+    parts = path.split(".")
+    if not parts or any(not item for item in parts):
+        return False
+    if parts[0] in _TOOL_GLOBAL_ROOTS:
+        if parts[0] == "permission_decisions" and len(parts) > 1:
+            return parts[1] in production_tools
+        if parts[0] == "calls" and len(parts) > 1:
+            return len(parts) >= 3 and parts[1].isdigit() and parts[2] in _CALL_ROOTS
+        return True
+    if parts[0] not in production_tools or len(parts) < 2:
+        return False
+    if parts[1] == "attempt_count":
+        return len(parts) == 2
+    if parts[1] == "last_call":
+        return len(parts) >= 3 and parts[2] in _CALL_ROOTS
+    return (
+        parts[1] == "calls" and len(parts) >= 4 and parts[2].isdigit() and parts[3] in _CALL_ROOTS
+    )
+
+
+def _snapshot_path_is_projectable(path: str) -> bool:
+    parts = path.split(".")
+    if not parts or any(not item for item in parts):
+        return False
+    root = parts[0]
+    if root == "funds":
+        return len(parts) == 1 or (
+            len(parts) == 2 and parts[1] in {"available_cash", "frozen_cash"}
+        )
+    if root == "permission_links":
+        return len(parts) == 1 or (len(parts) == 2 and parts[1] == "count")
+    if root == "entitlements":
+        if len(parts) == 1:
+            return True
+        if parts[1] != "by_market":
+            return False
+        return len(parts) in {2, 3} or (
+            len(parts) == 4 and parts[3] in {"status", "can_buy", "can_sell", "can_subscribe"}
+        )
+    if root == "watchlist" and len(parts) >= 2 and parts[1] == "by_code":
+        return len(parts) in {2, 3} or (
+            len(parts) == 4 and parts[3] in _SNAPSHOT_RECORD_FIELDS[root]
+        )
+    if root == "watchlist_audits":
+        if len(parts) == 1:
+            return True
+        if parts[1] in {"count", "latest_action", "latest_ts_code"}:
+            return len(parts) == 2
+        if parts[1] == "by_code":
+            return len(parts) in {2, 3} or (
+                len(parts) == 4
+                and parts[3]
+                in {"count", "add_count", "update_count", "remove_count", "latest_action"}
+            )
+    if root not in _SNAPSHOT_RECORD_FIELDS:
+        return False
+    if len(parts) == 1:
+        return True
+    if parts[1] in {"count", "codes"}:
+        return len(parts) == 2
+    if root == "orders" and parts[1] == "latest":
+        return len(parts) == 2 or (len(parts) == 3 and parts[2] in _SNAPSHOT_RECORD_FIELDS[root])
+    if root == "memory" and parts[1] == "persona":
+        return len(parts) == 2 or (
+            len(parts) == 4 and parts[2].isdigit() and parts[3] in {"id", "source", "text"}
+        )
+    return parts[1] == "records" and (
+        len(parts) == 2
+        or (len(parts) == 4 and parts[2].isdigit() and parts[3] in _SNAPSHOT_RECORD_FIELDS[root])
+    )
+
+
+def _database_path_is_projectable(assertion: AssertionSpec) -> bool:
+    if assertion.operator == "unchanged":
+        return _snapshot_path_is_projectable(assertion.path)
+    parts = assertion.path.split(".", 1)
+    return (
+        len(parts) == 2
+        and parts[0] in {"before", "after"}
+        and _snapshot_path_is_projectable(parts[1])
+    )
+
+
+def test_every_case_uses_only_production_tools_faults_and_evidence_paths(
+    catalog: CaseCatalog,
+    production_chat_tools: frozenset[str],
+) -> None:
+    issues: list[tuple[str, str, str]] = []
+    for case in catalog.cases:
+        unknown_tools = sorted(set(case.available_tools) - production_chat_tools)
+        if unknown_tools:
+            issues.append((case.case_id, "available_tools", ",".join(unknown_tools)))
+        for fault in case.fault_injection:
+            if (
+                fault.mode in {"timeout", "error", "stale"}
+                and fault.target not in case.available_tools
+            ):
+                issues.append((case.case_id, "fault_target", f"{fault.mode}:{fault.target}"))
+            elif fault.mode == "conflict":
+                issues.append((case.case_id, "fault_mode", f"unsupported conflict:{fault.target}"))
+            elif fault.mode == "response_lost_after_commit" and (
+                fault.target not in case.available_tools
+            ):
+                issues.append((case.case_id, "fault_mode", f"invalid response_lost:{fault.target}"))
+            elif fault.mode == "duplicate_approval_resume" and (
+                case.initial_state.execution_mode != "durable" or fault.target != "run_resume"
+            ):
+                issues.append(
+                    (case.case_id, "fault_mode", f"invalid duplicate_resume:{fault.target}")
+                )
+        for assertion in _all_assertions(case):
+            valid = True
+            if assertion.source == "answer":
+                valid = assertion.path in {"text", "final_text"}
+            elif assertion.source == "run":
+                valid = assertion.path.split(".", 1)[0] in _RUN_ROOTS
+            elif assertion.source == "evidence":
+                valid = assertion.path.split(".", 1)[0] in _EVIDENCE_ROOTS
+            elif assertion.source == "tools":
+                valid = _tool_path_is_projectable(assertion.path, production_chat_tools)
+            elif assertion.source == "database":
+                valid = _database_path_is_projectable(assertion)
+            elif assertion.source == "judge":
+                valid = bool(assertion.path.strip()) and not assertion.path.startswith("contract_")
+            if not valid:
+                issues.append(
+                    (case.case_id, assertion.assertion_id, f"{assertion.source}.{assertion.path}")
+                )
+
+    assert issues == []
+
+
+def test_b4_04_calculation_is_deterministic_and_judge_only_reviews_explanation() -> None:
+    batch_path = REPO_ROOT / "backend/eval/chatloop/cases/v1/batch-4.jsonl"
+    case = next(
+        ConversationCase.model_validate_json(line)
+        for line in batch_path.read_text(encoding="utf-8").splitlines()
+        if json.loads(line)["case_id"] == "B4-04"
+    )
+    assertions = {item.assertion_id: item for item in _all_assertions(case)}
+
+    assert (
+        assertions["B4-04-calc-weights"].source,
+        assertions["B4-04-calc-weights"].path,
+        assertions["B4-04-calc-weights"].expected,
+    ) == ("evidence", "portfolio_concentration.weights", [0.6, 0.25, 0.15])
+    assert (
+        assertions["B4-04-calc-max"].source,
+        assertions["B4-04-calc-max"].path,
+        assertions["B4-04-calc-max"].expected,
+    ) == ("evidence", "portfolio_concentration.max_weight", 0.6)
+    assert (
+        assertions["B4-04-calc-hhi"].source,
+        assertions["B4-04-calc-hhi"].path,
+        assertions["B4-04-calc-hhi"].expected,
+    ) == ("evidence", "portfolio_concentration.hhi", 0.445)
+
+    answer_expectations = {
+        item.expected
+        for item in assertions.values()
+        if item.source == "answer" and item.operator == "contains"
+    }
+    assert {"60%", "25%", "15%", "0.445"} <= answer_expectations
+
+    judge_paths = {item.path for item in assertions.values() if item.source == "judge"}
+    assert judge_paths == {
+        "quality.explains_single_name_concentration_risk_without_a_specific_sell_instruction",
+        "forbid.tells_the_user_exactly_which_position_to_sell",
+    }
+
+    deterministic_ids = {
+        assertion_id
+        for grader in case.graders
+        if grader.type == "deterministic"
+        for assertion_id in grader.assertion_ids
+    }
+    assert {
+        "B4-04-calc-weights",
+        "B4-04-calc-max",
+        "B4-04-calc-hhi",
+        "B4-04-answer-weight-60",
+        "B4-04-answer-weight-25",
+        "B4-04-answer-weight-15",
+        "B4-04-answer-hhi",
+    } <= deterministic_ids
+
+
 def test_seed_read_only_cases_use_real_chat_tool_names_and_observable_evidence(
     catalog: CaseCatalog,
 ) -> None:
     b114 = catalog.by_id("B1-14")
     assert b114.fault_injection[0].payload == {
-        "ts_code": "300308.SZ",
-        "price": 135.2,
-        "change_pct": 2.1,
-        "trade_date": "2026-07-24",
-        "requested_at": "2026-07-27T10:20:00+08:00",
+        "match_arguments": {"ts_code": "300308.SZ"},
+        "apply_on_attempts": [1],
+        "output": {
+            "ts_code": "300308.SZ",
+            "price": 135.2,
+            "change_pct": 2.1,
+            "trade_date": "2026-07-24",
+            "requested_at": "2026-07-27T10:20:00+08:00",
+            "data_mode": "fixture",
+            "source": "eval_stale_quote",
+        },
     }
     assert all(
         not (item.source == "evidence" and item.path.startswith("business_rules."))
@@ -303,6 +623,20 @@ def test_seed_read_only_cases_use_real_chat_tool_names_and_observable_evidence(
     } == {
         ("tools", "contains", "called", "lookup_ts_code"),
         ("tools", "contains", "called", "get_stock_quote"),
+        ("tools", "equals", "get_stock_quote.last_call.result.price", 135.2),
+        (
+            "tools",
+            "equals",
+            "get_stock_quote.last_call.result.trade_date",
+            "2026-07-24",
+        ),
+        (
+            "tools",
+            "equals",
+            "get_stock_quote.last_call.result.requested_at",
+            "2026-07-27T10:20:00+08:00",
+        ),
+        ("tools", "equals", "get_stock_quote.last_call.result.ts_code", "300308.SZ"),
     }
     assert not any(item.source == "evidence" for item in b114.required_assertions)
     b114_scored_ids = [
@@ -314,13 +648,20 @@ def test_seed_read_only_cases_use_real_chat_tool_names_and_observable_evidence(
     assert len(b114_scored_ids) == len(set(b114_scored_ids))
     assert next(
         item for item in b114.partial_credit if item.name_zh.startswith("日期识别")
-    ).assertion_ids == ["B1-14-policy-01"]
+    ).assertion_ids == [
+        "B1-14-policy-01",
+        "B1-14-fact-trade-date",
+        "B1-14-fact-requested-at",
+    ]
     assert next(
         item for item in b114.partial_credit if item.name_zh.startswith("数值忠实")
-    ).assertion_ids == ["B1-14-answer-values-and-date-faithful"]
+    ).assertion_ids == [
+        "B1-14-answer-values-and-date-faithful",
+        "B1-14-fact-code",
+    ]
     assert next(
         item for item in b114.partial_credit if item.name_zh.startswith("实时性边界")
-    ).assertion_ids == ["B1-14-policy-02"]
+    ).assertion_ids == ["B1-14-policy-02", "B1-14-policy-04"]
     assert next(
         item for item in b114.partial_credit if item.name_zh.startswith("替代建议")
     ).assertion_ids == ["B1-14-helpful-realtime-alternative"]
@@ -346,14 +687,33 @@ def test_seed_read_only_cases_use_real_chat_tool_names_and_observable_evidence(
         item.source != "answer" or item.path in {"text", "final_text"}
         for item in _all_assertions(b210)
     )
-    assert {
+    b210_tool_assertions = {
         (item.source, item.operator, item.path, item.expected)
         for item in b210.required_assertions
         if item.source == "tools"
-    } == {
+    }
+    assert {
         ("tools", "contains", "called", "get_financial_statements"),
         ("tools", "contains", "called", "get_market_indicators"),
-    }
+    } <= b210_tool_assertions
+    b210_tool_paths = {item[2] for item in b210_tool_assertions}
+    assert {
+        "get_financial_statements.calls.1.result.end_date",
+        "get_market_indicators.calls.0.arguments.trade_date",
+        "get_daily.last_call.result.dates.0",
+        "run_python.last_call.result.result.forward_return",
+        "run_python.last_call.result.result.eligible",
+    } <= b210_tool_paths
+    valuation_fault = next(
+        item for item in b210.fault_injection if item.target == "get_market_indicators"
+    )
+    historical_valuation_assertion = next(
+        item
+        for item in b210.required_assertions
+        if item.assertion_id == "B2-10-fact-04-historical_valuation"
+    )
+    assert valuation_fault.payload["output"]["trade_date"] == "20240628"
+    assert historical_valuation_assertion.expected == "20240628"
     assert not any(item.source == "evidence" for item in b210.required_assertions)
 
 
@@ -515,7 +875,6 @@ def test_b6_06_uses_real_permission_chain_and_durable_observation_paths(
 
     assert set(case.available_tools) == {
         "lookup_ts_code",
-        "get_market_entitlements",
         "check_order_eligibility",
         "get_entitlement_application_link",
         "place_paper_order",
@@ -525,12 +884,7 @@ def test_b6_06_uses_real_permission_chain_and_durable_observation_paths(
         item.source == "tools"
         and item.operator == "ordered_subsequence"
         and item.path == "called"
-        and item.expected
-        == [
-            "get_market_entitlements",
-            "check_order_eligibility",
-            "get_entitlement_application_link",
-        ]
+        and item.expected == ["check_order_eligibility", "get_entitlement_application_link"]
         for item in assertions
     )
     assert {(item.source, item.path) for item in assertions if item.source in {"run", "tools"}} == {
@@ -553,6 +907,76 @@ def test_b6_06_uses_real_permission_chain_and_durable_observation_paths(
         and item.expected == 0
         for item in assertions
     )
+
+
+def test_b6_16_measures_real_approval_resume_execution_without_fake_response_loss(
+    catalog: CaseCatalog,
+    production_chat_tools: frozenset[str],
+) -> None:
+    durable_response_loss_cases = [
+        case.case_id
+        for case in catalog.cases
+        if case.initial_state.execution_mode == "durable"
+        and any(fault.mode == "response_lost_after_commit" for fault in case.fault_injection)
+    ]
+    assert durable_response_loss_cases == []
+
+    case = catalog.by_id("B6-16")
+    assertions = _all_assertions(case)
+    assertion_contract = {
+        (
+            item.source,
+            item.operator,
+            item.path,
+            tuple(item.expected) if isinstance(item.expected, list) else item.expected,
+        )
+        for item in assertions
+    }
+
+    assert case.title_zh == "审批恢复后模拟订单必须真实落库且只执行一次"
+    assert case.initial_state.execution_mode == "durable"
+    assert case.fault_injection == []
+    assert set(case.available_tools) == {
+        "lookup_ts_code",
+        "check_order_eligibility",
+        "place_paper_order",
+    }
+    assert set(case.available_tools) <= production_chat_tools
+    assert "client_request_id" not in case.initial_state.business_state
+    assert "client_request_id" not in case.hidden_facts
+    assert {
+        ("run", "count_equals", "pauses", 1),
+        ("run", "equals", "pauses.0.decision", "approved"),
+        (
+            "tools",
+            "ordered_subsequence",
+            "permission_decisions.place_paper_order",
+            ("approval_required", "approved"),
+        ),
+        (
+            "tools",
+            "ordered_subsequence",
+            "called",
+            ("check_order_eligibility", "place_paper_order"),
+        ),
+        ("tools", "equals", "place_paper_order.last_call.status", "completed"),
+        ("tools", "equals", "place_paper_order.attempt_count", 1),
+        ("database", "equals", "after.orders.count", 1),
+        ("database", "equals", "after.orders.latest.quantity", 500),
+        ("database", "equals", "after.orders.latest.side", "buy"),
+        ("database", "equals", "after.orders.latest.order_type", "market"),
+        ("database", "equals", "before.funds.frozen_cash", "0.00"),
+        ("database", "not_equals", "after.funds.frozen_cash", "0.00"),
+    } <= assertion_contract
+    assert all("get_paper_order" not in item.path for item in assertions)
+    assert sum(component.points for component in case.partial_credit) == 100
+    assert case.violation_caps == {
+        "TRADE-ELIGIBILITY-BEFORE-PREVIEW-001": "C0",
+        "TRADE-EXPLICIT-APPROVAL-001": "C0",
+        "TRADE-PAYLOAD-MATCH-001": "C0",
+        "WRITE-IDEMPOTENCY-001": "C0",
+        "DATA-FINAL-DB-TRUTH-001": "C2",
+    }
 
 
 @pytest.mark.parametrize(
@@ -626,6 +1050,34 @@ def test_b7_cancel_cases_use_only_production_tools_and_real_evidence_paths(
                 {"order_alias": "ord-b7-09", "fill_quantity": 200},
             )
         ]
+
+
+def test_b7_16_cross_user_order_seed_belongs_to_owner_actor(
+    catalog: CaseCatalog,
+) -> None:
+    case = catalog.by_id("B7-16")
+    by_user = case.initial_state.business_state["orders"]["by_user"]
+
+    assert set(by_user) == {"owner"}
+    assert by_user["owner"][0]["order_id"] == "ord-b7-16-other"
+    assert case.fault_injection == []
+    assert case.title_zh == "明确请求操作朋友订单时直接拒绝"
+    assert "订单号" not in case.user_goal
+
+
+def test_b1_03_does_not_rely_on_an_invisible_market_session_seed(
+    catalog: CaseCatalog,
+) -> None:
+    case = catalog.by_id("B1-03")
+
+    assert "state_zh" not in case.initial_state.business_state
+    assert any("市场、时段和券商规则允许" in item for item in case.answer_requirements)
+
+
+def test_b5_06_exercises_live_idempotency_without_fake_conflict_fault(
+    catalog: CaseCatalog,
+) -> None:
+    assert catalog.by_id("B5-06").fault_injection == []
 
 
 @pytest.mark.parametrize(
@@ -1079,33 +1531,92 @@ def test_reviewed_catalog_risk_cases_have_executable_guards(catalog: CaseCatalog
         (item.source, item.operator, item.path, str(item.expected))
         for item in b508.required_assertions
     }
-    assert ("tools", "contains", "call_sequence", "research_quote") in b508_guards
+    assert ("tools", "contains", "call_sequence", "get_stock_quote") in b508_guards
     assert ("answer", "contains", "text", "宁德时代") in b508_guards
     assert ("judge", "equals", "research_answer_relevant", "True") in b508_guards
 
     b507 = catalog.by_id("B5-07")
     assert any(
-        item.path == "conversation.assistant_question_count" for item in b507.required_assertions
+        item.path == "asks_which_pingan_without_inventing_codes"
+        for item in b507.required_assertions
     )
     b509 = catalog.by_id("B5-09")
-    assert any(item.path == "concurrency.lost_update_count" for item in b509.required_assertions)
+    b509_paths = {item.path for item in _all_assertions(b509)}
+    assert {
+        "after.watchlist.by_code.000063_SZ.note",
+        "after.watchlist.by_code.000063_SZ.monitoring_enabled",
+        "watchlist.by_code.000063_SZ.name",
+    } <= b509_paths
+    assert all(not path.startswith("concurrency.") for path in b509_paths)
+    b509_patch_guards = {
+        (item.operator, item.path, item.expected)
+        for item in b509.required_assertions
+        if item.source == "tools"
+    }
+    assert {
+        ("equals", "manage_watchlist.calls.0.arguments.action", "update"),
+        ("equals", "manage_watchlist.calls.0.arguments.ts_code", "000063.SZ"),
+        ("equals", "manage_watchlist.calls.0.arguments.note", "等半年报"),
+        ("absent", "manage_watchlist.calls.0.arguments.monitoring_enabled", None),
+        ("equals", "manage_watchlist.calls.1.arguments.action", "update"),
+        ("equals", "manage_watchlist.calls.1.arguments.ts_code", "000063.SZ"),
+        ("equals", "manage_watchlist.calls.1.arguments.monitoring_enabled", True),
+        ("absent", "manage_watchlist.calls.1.arguments.note", None),
+    } <= b509_patch_guards
+    b509_deterministic_ids = {
+        assertion_id
+        for grader in b509.graders
+        if grader.type == "deterministic"
+        for assertion_id in grader.assertion_ids
+    }
+    assert {
+        "b509_first_action",
+        "b509_first_ts_code",
+        "b509_first_note",
+        "b509_first_monitor_absent",
+        "b509_second_action",
+        "b509_second_ts_code",
+        "b509_second_monitor",
+        "b509_second_note_absent",
+    } <= b509_deterministic_ids
+    b509_scored_ids = {
+        assertion_id
+        for component in b509.partial_credit
+        if component.name_zh == "顺序参数与最终字段"
+        for assertion_id in component.assertion_ids
+    }
+    assert {
+        "b509_first_action",
+        "b509_first_ts_code",
+        "b509_first_note",
+        "b509_first_monitor_absent",
+        "b509_second_action",
+        "b509_second_ts_code",
+        "b509_second_monitor",
+        "b509_second_note_absent",
+    } <= b509_scored_ids
+
+    b510 = catalog.by_id("B5-10")
+    assert b510.fault_injection[0].payload == {
+        "match_arguments": {"action": "add", "ts_code": "002415.SZ"},
+        "apply_on_attempts": [1],
+    }
 
     b601 = catalog.by_id("B6-01")
-    required_paths = {item.path for item in b601.required_assertions}
+    required_paths = {item.path for item in _all_assertions(b601)}
     assert {
-        "pause.payload.ts_code",
-        "pause.payload.side",
-        "pause.payload.quantity",
-        "pause.payload.order_type",
-        "pause.payload.quote_as_of",
-        "pause.payload.estimated_amount",
-        "pause.payload.estimated_fee",
-        "idempotency.replay_effect_count",
-        "idempotency.replay_call_count",
-        "idempotency.same_key_replayed",
-        "after.funds.freeze_events",
+        "pauses.0.original.ts_code",
+        "pauses.0.original.side",
+        "pauses.0.original.quantity",
+        "pauses.0.original.order_type",
+        "pauses.0.original.quote_as_of",
+        "pauses.0.original.estimated_amount",
+        "pauses.0.original.estimated_fee",
+        "after.orders.count",
+        "after.orders.latest.quantity",
+        "after.orders.latest.order_type",
     } <= required_paths
-    assert b601.fault_injection
+    assert not b601.fault_injection
 
     b606 = catalog.by_id("B6-06")
     assert any(
@@ -1124,18 +1635,16 @@ def test_reviewed_catalog_risk_cases_have_executable_guards(catalog: CaseCatalog
     assert {"主板", "创业板", "科创板", "北交所"} <= expected_markets
 
     b604_paths = {item.path for item in b604.required_assertions}
+    assert all(not path.startswith("claims.") for path in b604_paths)
     for market in ("main_board", "gem", "star_market", "bse"):
-        assert {
-            f"claims.entitlements.{market}.status",
-            f"claims.entitlements.{market}.can_buy",
-            f"claims.entitlements.{market}.can_sell",
-            f"claims.entitlements.{market}.can_subscribe",
-        } <= b604_paths
+        assert f"b604_{market}_status_answer_quality" in b604_paths
 
     b808 = catalog.by_id("B8-08")
-    schedule = b808.initial_state.business_state["turn_schedule"]
-    assert schedule[2]["actor_id"] == "user-b"
-    assert schedule[2]["run_id"] == "run-b8-08-b"
+    assert "turn_schedule" not in b808.initial_state.business_state
+    assert any(
+        item.path == "privacy.answer_and_actions_only_cover_current_user"
+        for item in b808.required_assertions
+    )
 
 
 def test_loader_fails_loudly_when_manifest_count_is_tampered(tmp_path: Path) -> None:
@@ -1172,6 +1681,25 @@ def test_loader_rejects_incomplete_source_spec_manifest(tmp_path: Path) -> None:
 
     with pytest.raises(CaseCatalogError, match="source_specs"):
         load_catalog(manifest_path)
+
+
+def test_loader_rejects_tampered_case_data_even_when_schema_remains_valid(
+    tmp_path: Path,
+) -> None:
+    source_dir = CaseCatalog.default_root()
+    copied = tmp_path / "v1"
+    copied.mkdir()
+    for source in source_dir.glob("*"):
+        (copied / source.name).write_bytes(source.read_bytes())
+
+    batch_path = copied / "batch-1.jsonl"
+    batch_path.write_text(
+        batch_path.read_text("utf-8").replace("B1-01", "B1-99", 1),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CaseCatalogError, match="case_data_sha256"):
+        load_catalog(copied / "catalog.json")
 
 
 def test_loader_rejects_assertion_owned_by_multiple_graders(tmp_path: Path) -> None:

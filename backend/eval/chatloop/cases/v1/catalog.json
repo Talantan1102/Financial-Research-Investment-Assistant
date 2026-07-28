@@ -13,7 +13,8 @@
     "docs/superpowers/specs/conversational-agent-eval-cases/batch-7-order-lifecycle.md",
     "docs/superpowers/specs/conversational-agent-eval-cases/batch-8-cross-task-pressure.md"
   ],
-  "source_spec_sha256": "07b532dfb58ce55f52a80d7d338ea0530e32b11f235c0ece8fbd40d342919a32",
+  "source_spec_sha256": "b7174be86a1f8d3761e1de6f5ccded85153a07d7547a0f8172dd9bb947975214",
+  "case_data_sha256": "81c93e1b97c0e55d8937f8a8f01b6decd6b7403416d7bcbc29d8d22d8f1f7c22",
   "total_count": 120,
   "batches": [
     {"batch": 1, "file": "batch-1.jsonl", "count": 22},

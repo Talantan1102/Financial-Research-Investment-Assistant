@@ -379,6 +379,15 @@ class TrialEnvironment:
                     )
                 ).all()
             )
+            watchlist_audits = list(
+                (
+                    await session.scalars(
+                        select(WatchlistAudit)
+                        .where(WatchlistAudit.user_id == user_id)
+                        .order_by(WatchlistAudit.created_at, WatchlistAudit.id)
+                    )
+                ).all()
+            )
             memory_edges = list(
                 (
                     await session.scalars(
@@ -476,6 +485,42 @@ class TrialEnvironment:
             }
             for row in watchlist
         ]
+        watchlist_by_code = {row["ts_code"].replace(".", "_"): row for row in watchlist_rows}
+        watchlist_audit_rows: list[dict[str, Any]] = []
+        watchlist_audits_by_code: dict[str, dict[str, Any]] = {}
+        for row in watchlist_audits:
+            before = dict(row.before_json) if isinstance(row.before_json, dict) else None
+            after = dict(row.after_json) if isinstance(row.after_json, dict) else None
+            payload = after or before or {}
+            ts_code = payload.get("ts_code")
+            audit_row = {
+                "id": str(row.id),
+                "item_id": str(row.item_id),
+                "ts_code": ts_code,
+                "action": row.action,
+                "before": before,
+                "after": after,
+                "source_session_id": row.source_session_id,
+                "source_tool_call_id": row.source_tool_call_id,
+            }
+            watchlist_audit_rows.append(audit_row)
+            if isinstance(ts_code, str) and ts_code:
+                key = ts_code.replace(".", "_")
+                summary = watchlist_audits_by_code.setdefault(
+                    key,
+                    {
+                        "count": 0,
+                        "add_count": 0,
+                        "update_count": 0,
+                        "remove_count": 0,
+                        "latest_action": None,
+                    },
+                )
+                summary["count"] += 1
+                action_key = f"{row.action}_count"
+                if action_key in summary:
+                    summary[action_key] += 1
+                summary["latest_action"] = row.action
         memory_rows = [
             {
                 "id": str(row.edge_id),
@@ -518,6 +563,18 @@ class TrialEnvironment:
                 "count": len(watchlist_rows),
                 "codes": sorted(row["ts_code"] for row in watchlist_rows),
                 "records": watchlist_rows,
+                "by_code": watchlist_by_code,
+            },
+            "watchlist_audits": {
+                "count": len(watchlist_audit_rows),
+                "records": watchlist_audit_rows,
+                "latest_action": (
+                    watchlist_audit_rows[-1]["action"] if watchlist_audit_rows else None
+                ),
+                "latest_ts_code": (
+                    watchlist_audit_rows[-1]["ts_code"] if watchlist_audit_rows else None
+                ),
+                "by_code": watchlist_audits_by_code,
             },
             "memory": {
                 "count": len(memory_rows) + len(persona_rows),
@@ -529,7 +586,7 @@ class TrialEnvironment:
         }
 
     async def capture_before(self) -> dict[str, Any]:
-        self.before_snapshot = await self.snapshot()
+        self.before_snapshot = await self.snapshot(actor_name="requester")
         return self.before_snapshot
 
     async def capture_after(self) -> dict[str, Any]:
@@ -540,7 +597,7 @@ class TrialEnvironment:
             self._active_read_session = session
             try:
                 await self._refresh_owned_manifest()
-                self.after_snapshot = await self.snapshot()
+                self.after_snapshot = await self.snapshot(actor_name="requester")
             finally:
                 self._active_read_session = None
         return self.after_snapshot
@@ -1441,10 +1498,10 @@ class CaseEnvironmentManager:
             external_memory_cleanup=self._external_memory_cleanup,
         )
         await environment._refresh_owned_manifest()
-        initial_snapshot = await environment.snapshot()
+        initial_snapshot = await environment.snapshot(actor_name="creator")
         _validate_seed_projection(case, initial_snapshot, manifest)
         environment.expected_initial_snapshot = deepcopy(initial_snapshot)
-        environment.before_snapshot = deepcopy(initial_snapshot)
+        await environment.capture_before()
         return environment
 
     async def _seed_watchlists(
@@ -1834,7 +1891,14 @@ def _empty_snapshot() -> dict[str, Any]:
         "positions": {"count": 0, "codes": [], "records": []},
         "orders": {"count": 0, "records": [], "latest": None},
         "fills": {"count": 0, "records": []},
-        "watchlist": {"count": 0, "codes": [], "records": []},
+        "watchlist": {"count": 0, "codes": [], "records": [], "by_code": {}},
+        "watchlist_audits": {
+            "count": 0,
+            "records": [],
+            "latest_action": None,
+            "latest_ts_code": None,
+            "by_code": {},
+        },
         "memory": {"count": 0, "records": [], "persona": []},
         "entitlements": {"by_market": {}},
         "permission_links": {"count": 0},

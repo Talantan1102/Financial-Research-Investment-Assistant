@@ -24,9 +24,22 @@ class FakeRuntime:
         self.sync_session_factory = object()
         self.subprocess_env: dict[str, str] = {}
         self.durable_driver: object | None = None
+        self.memory_client = object()
+        self.memory_collection_name = "chat_memory_eval_fake"
+        self.memory_provisioned = False
 
     def bind_durable_driver(self, driver: object) -> None:
         self.durable_driver = driver
+
+    def provision_memory_isolation(self) -> None:
+        self.memory_provisioned = True
+
+    async def cleanup_memory_mirrors(
+        self,
+        _edge_ids: list[str],
+        _node_ids: list[str],
+    ) -> None:
+        return None
 
     async def aclose(self) -> None:
         if self.cleanup_error is not None:
@@ -66,6 +79,18 @@ class FakePlanExecutor:
 
 def _plan() -> BusinessCasePlan:
     return BusinessCasePlan(case=load_catalog().by_id("B1-01"), trial_count=1)
+
+
+def test_versions_record_the_effective_environment_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MOCK_TUSHARE_MODEL", "qwen-plus")
+    monkeypatch.setattr(business_runtime, "_full_git_sha", lambda: "test-git")
+
+    versions = business_runtime._versions()
+
+    assert versions["model"] == "qwen-plus"
+    assert versions["git_sha"] == "test-git"
 
 
 def _assertion(*, source: str, operator: str = "equals") -> AssertionSpec:
@@ -120,7 +145,11 @@ def _build_test_components(
         captured["runner"] = kwargs["runner"]
         return object()
 
-    monkeypatch.setattr(business_runtime, "CaseEnvironmentManager", lambda _runtime: object())
+    monkeypatch.setattr(
+        business_runtime,
+        "CaseEnvironmentManager",
+        lambda _runtime, **_kwargs: object(),
+    )
     monkeypatch.setattr(business_runtime, "BusinessStructuredEvidenceProvider", capture_provider)
     monkeypatch.setattr(business_runtime, "BusinessPlanExecutor", capture_plan_executor)
     captured["executor"] = business_runtime._build_components(
@@ -180,7 +209,11 @@ def test_components_bind_lazy_real_durable_executor_without_starting_resources(
     )
     captured: dict[str, Any] = {}
 
-    monkeypatch.setattr(business_runtime, "CaseEnvironmentManager", lambda _runtime: object())
+    monkeypatch.setattr(
+        business_runtime,
+        "CaseEnvironmentManager",
+        lambda _runtime, **_kwargs: object(),
+    )
     monkeypatch.setattr(
         business_runtime,
         "BusinessStructuredEvidenceProvider",
@@ -215,6 +248,68 @@ def test_components_bind_lazy_real_durable_executor_without_starting_resources(
         captured["runner"]._executors["durable"],
         business_runtime.DurableHttpBusinessExecutor,
     )
+
+
+def test_memory_case_provisions_and_injects_run_scoped_memory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("CHATLOOP_JUDGE_CALIBRATION_PATH", raising=False)
+    monkeypatch.setattr(openai_client, "build_llm_service_from_env", object)
+    runtime = FakeRuntime()
+    eval_memory = object()
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(
+        business_runtime,
+        "_build_eval_memory",
+        lambda selected_runtime: eval_memory if selected_runtime is runtime else None,
+    )
+    monkeypatch.setattr(
+        business_runtime,
+        "CaseEnvironmentManager",
+        lambda _runtime, **_kwargs: object(),
+    )
+    monkeypatch.setattr(
+        business_runtime,
+        "BusinessStructuredEvidenceProvider",
+        lambda **_kwargs: object(),
+    )
+
+    def capture_plan_executor(**kwargs: Any) -> object:
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(business_runtime, "BusinessPlanExecutor", capture_plan_executor)
+    memory_case = (
+        load_catalog()
+        .by_id("B4-06")
+        .model_copy(
+            update={
+                "required_assertions": [],
+                "forbidden_outcomes": [],
+                "expected_state_changes": [],
+                "acceptable_outcomes": [],
+            }
+        )
+    )
+    plan = BusinessCasePlan(case=memory_case, trial_count=1)
+
+    business_runtime._build_components(
+        runtime=runtime,
+        run_id="run-memory",
+        plans=[plan],
+        recorder=FakeRecorder(),
+        versions={
+            "case": "test-cases",
+            "policy": "test-policy",
+            "evaluator": "test-evaluator",
+            "model": "test-model",
+            "prompt_sha256": "test-prompt",
+            "git_sha": "test-git",
+        },
+    )
+
+    assert runtime.memory_provisioned is True
+    assert captured["runner"]._executors["direct"]._memory is eval_memory
 
 
 @pytest.mark.asyncio
@@ -511,6 +606,32 @@ async def test_cleanup_failure_after_confirmed_drop_is_not_marked_runtime_leaked
         await executor([_plan()])
 
     assert recorder.finishes[0]["status"] == "cleanup_failed"
+
+
+@pytest.mark.asyncio
+async def test_memory_collection_leak_is_marked_runtime_leaked() -> None:
+    cleanup_error = RuntimeCleanupError(
+        database_name="fria_eval_fake",
+        database_leaked=False,
+        memory_collection_name="chat_memory_eval_leaked",
+        memory_leaked=True,
+        failures=(("memory_collection", OSError("drop failed")),),
+    )
+    runtime = FakeRuntime(cleanup_error=cleanup_error)
+    recorder = FakeRecorder()
+    outcome = BusinessTrialOutcome("B1-01", 0, "valid", True)
+    executor = ProductionBusinessExecutor(
+        admin_dsn_factory=lambda: "postgresql://admin/postgres",
+        runtime_factory=lambda **_kwargs: runtime,
+        recorder_factory=lambda: recorder,
+        component_builder=lambda **_kwargs: FakePlanExecutor([outcome]),
+        run_id_factory=lambda: "run-business-memory-leaked",
+    )
+
+    with pytest.raises(RuntimeCleanupError, match="drop failed"):
+        await executor([_plan()])
+
+    assert recorder.finishes[0]["status"] == "runtime_leaked"
 
 
 @pytest.mark.asyncio

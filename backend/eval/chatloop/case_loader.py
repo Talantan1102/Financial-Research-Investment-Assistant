@@ -73,6 +73,10 @@ class CatalogManifest(_StrictModel):
     source_spec_sha256: str = Field(
         pattern=r"^[0-9a-f]{64}$", description="所有设计源文档规范化内容的摘要"
     )
+    case_data_sha256: str = Field(
+        pattern=r"^[0-9a-f]{64}$",
+        description="八份 JSONL 用例数据规范化内容的摘要",
+    )
     total_count: PositiveInt = Field(strict=True, description="目录预期用例总数")
     batches: list[BatchManifest] = Field(description="八个批次文件及预期数量")
 
@@ -171,6 +175,7 @@ def load_catalog(manifest_path: Path | str | None = None) -> CaseCatalog:
     expected_counts = {item.batch: item.count for item in manifest.batches}
     if actual_counts != expected_counts:
         raise CaseCatalogError("manifest batch counts do not match loaded cases")
+    _verify_case_data_hash(root, manifest)
     _verify_source_hash(root, manifest)
     return CaseCatalog(root=root, manifest=manifest, cases=tuple(cases))
 
@@ -352,6 +357,21 @@ def _verify_source_hash(root: Path, manifest: CatalogManifest) -> None:
         digest.update(b"\0")
     if digest.hexdigest() != manifest.source_spec_sha256:
         raise CaseCatalogError("source_spec_sha256 does not match approved Markdown inputs")
+
+
+def _verify_case_data_hash(root: Path, manifest: CatalogManifest) -> None:
+    digest = hashlib.sha256()
+    for batch in sorted(manifest.batches, key=lambda item: item.batch):
+        source = root / batch.file
+        if not source.is_file():
+            raise CaseCatalogError(f"missing case data: {batch.file}")
+        normalized = "\n".join(source.read_text(encoding="utf-8").splitlines()) + "\n"
+        digest.update(batch.file.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(normalized.encode("utf-8"))
+        digest.update(b"\0")
+    if digest.hexdigest() != manifest.case_data_sha256:
+        raise CaseCatalogError("case_data_sha256 does not match versioned JSONL inputs")
 
 
 def _find_repo_root(start: Path) -> Path:

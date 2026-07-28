@@ -25,6 +25,7 @@ from eval.chatloop.business_runner import (
     BusinessRunner,
     DirectToolLoopBusinessExecutor,
     DurableHttpBusinessExecutor,
+    current_durable_tool_fault_plans,
 )
 from eval.chatloop.disposable_runtime import DisposableEvalRuntime, RuntimeCleanupError
 from eval.chatloop.durable_runtime import (
@@ -33,6 +34,7 @@ from eval.chatloop.durable_runtime import (
     InProcessDurableDriver,
 )
 from eval.chatloop.environment import CaseEnvironmentManager
+from eval.chatloop.faults import FaultInjectingHub
 from eval.chatloop.judge_calibration import JudgeCalibrationGate
 from eval.chatloop.policy_registry import PolicyRegistry
 from eval.chatloop.recorder import ChatloopEvalRecorder, new_run_id, now_iso
@@ -182,7 +184,11 @@ def _cleanup_failure_status(
     *,
     execution_failed: bool = False,
 ) -> str:
-    if isinstance(error, RuntimeCleanupError) and not error.database_leaked:
+    if (
+        isinstance(error, RuntimeCleanupError)
+        and not error.database_leaked
+        and not error.memory_leaked
+    ):
         return "harness_failed" if execution_failed else "cleanup_failed"
     return "runtime_leaked"
 
@@ -228,6 +234,10 @@ def _build_components(
             }
         )
     llm = build_llm_service_from_env()
+    eval_memory: Any = object()
+    if _plans_require_memory(plans):
+        runtime.provision_memory_isolation()
+        eval_memory = _build_eval_memory(runtime)
     semantic_judge: LLMSemanticEvidenceJudge | None = None
     if gate is not None:
         semantic_judge = LLMSemanticEvidenceJudge(
@@ -237,19 +247,29 @@ def _build_components(
         )
     durable_driver = InProcessDurableDriver.lazy(
         runtime.async_session_factory,
-        resource_factory=_durable_resource_factory(runtime=runtime, llm=llm),
+        resource_factory=_durable_resource_factory(
+            runtime=runtime,
+            llm=llm,
+            memory=eval_memory,
+        ),
     )
     runtime.bind_durable_driver(durable_driver)
     from app.processes.run_api import create_run_api_app
 
     run_api = create_run_api_app(session_factory=runtime.async_session_factory)
-    manager = CaseEnvironmentManager(runtime)
+    manager = CaseEnvironmentManager(
+        runtime,
+        external_memory_cleanup=(
+            runtime.cleanup_memory_mirrors if _plans_require_memory(plans) else None
+        ),
+    )
     runner = BusinessRunner(
         manager,
         direct_executor=DirectToolLoopBusinessExecutor(
             runtime.async_session_factory,
             sync_session_factory=runtime.sync_session_factory,
             subprocess_env=runtime.subprocess_env,
+            memory=eval_memory,
         ),
         durable_executor=DurableHttpBusinessExecutor(
             runtime.async_session_factory,
@@ -287,9 +307,14 @@ def _durable_resource_factory(
     *,
     runtime: DisposableEvalRuntime,
     llm: Any,
+    memory: Any = None,
 ) -> DurableResourceFactory:
     async def build() -> tuple[Any, AsyncCleanup]:
-        return await _build_durable_worker_resources(runtime=runtime, llm=llm)
+        return await _build_durable_worker_resources(
+            runtime=runtime,
+            llm=llm,
+            memory=memory,
+        )
 
     return build
 
@@ -298,6 +323,7 @@ async def _build_durable_worker_resources(
     *,
     runtime: DisposableEvalRuntime,
     llm: Any,
+    memory: Any = None,
 ) -> tuple[Any, AsyncCleanup]:
     """Open the real MCP/ChatLoop worker stack with all-or-nothing cleanup."""
     from app.chatloop.worker_wiring import build_heavy_singletons
@@ -319,7 +345,7 @@ async def _build_durable_worker_resources(
             sync_session_factory=runtime.sync_session_factory,
             mcp_client=mcp_client,
             llm=llm,
-            memory=object(),
+            memory=memory if memory is not None else object(),
         )
         provider, model = resolve_llm_identity(llm)
         executor_builder = build_chat_executor_builder(
@@ -327,6 +353,10 @@ async def _build_durable_worker_resources(
             provider=provider,
             model=model,
             risk_policy=load_tool_risk_policy(os.environ),
+            tool_hub_decorator=lambda hub: FaultInjectingHub(
+                hub,
+                list(current_durable_tool_fault_plans()),
+            ),
         )
     except BaseException:
         await mcp_context.__aexit__(*sys.exc_info())
@@ -359,6 +389,24 @@ def _plans_require_semantic_judge(plans: Sequence[BusinessCasePlan]) -> bool:
     return False
 
 
+def _plans_require_memory(plans: Sequence[BusinessCasePlan]) -> bool:
+    return any(
+        "memory" in plan.case.initial_state.business_state
+        or any("memory" in tool.lower() for tool in plan.case.available_tools)
+        for plan in plans
+    )
+
+
+def _build_eval_memory(runtime: DisposableEvalRuntime) -> Any:
+    from app.mcp_server.tools.memory._common import build_memory_from_env
+
+    return build_memory_from_env(
+        pg_session_factory=runtime.sync_session_factory,
+        milvus_client=runtime.memory_client,
+        collection_name=runtime.memory_collection_name,
+    )
+
+
 def _catalog_for_plans():
     from eval.chatloop.case_loader import load_catalog
 
@@ -367,16 +415,17 @@ def _catalog_for_plans():
 
 def _versions() -> dict[str, str]:
     from app.chatloop.system_prompt import CHAT_SYSTEM_PROMPT
-    from app.services.tier_router import V0_DEFAULT_MODEL
+    from app.services.llm_identity import resolve_llm_identity_from_env
 
     from eval.chatloop.case_loader import load_catalog
 
     catalog = load_catalog()
+    _provider, model = resolve_llm_identity_from_env()
     return {
         "case": catalog.manifest.catalog_version,
         "policy": catalog.policy_version,
         "evaluator": "business-eval-v1",
-        "model": V0_DEFAULT_MODEL,
+        "model": model,
         "prompt_sha256": sha256(CHAT_SYSTEM_PROMPT.encode("utf-8")).hexdigest(),
         "git_sha": _full_git_sha(),
     }

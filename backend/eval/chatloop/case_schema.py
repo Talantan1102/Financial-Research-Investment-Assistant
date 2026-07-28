@@ -148,6 +148,7 @@ class FaultSpec(_StrictModel):
         "approval_delay",
         "suspended_quote",
         "response_lost_after_commit",
+        "duplicate_approval_resume",
     ] = Field(description="评估环境注入的故障模式")
     payload: dict[str, Any] = Field(default_factory=dict, description="故障模式所需的附加参数")
 

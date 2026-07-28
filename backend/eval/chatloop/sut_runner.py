@@ -232,7 +232,7 @@ class DurableRunHttpTransport:
         case_id: str,
         messages: list[str],
         run_idx: int,
-        response_lost_after_commit: bool = False,
+        duplicate_approval_resume: bool = False,
     ) -> TransportObservation:
         """Drive a business-case message script through real Run API boundaries."""
         import httpx
@@ -250,7 +250,7 @@ class DurableRunHttpTransport:
         final_outcome: dict[str, Any] | None = None
         total_tokens = 0
         cost_cny = Decimal("0")
-        lost_injected = False
+        duplicate_resume: dict[str, Any] = {"attempted": False, "status_code": None}
         message_index = 0
 
         async with httpx.AsyncClient(
@@ -313,9 +313,17 @@ class DurableRunHttpTransport:
                         json={"pause_id": str(pause.id), "response": resume_response},
                     )
                     resumed.raise_for_status()
+                    if duplicate_approval_resume and pause.pause_type == "approval":
+                        duplicate = await client.post(
+                            f"/api/v1/tenants/{self._tenant_id}/runs/{run_id}/resume",
+                            headers=headers,
+                            json={"pause_id": str(pause.id), "response": resume_response},
+                        )
+                        duplicate_resume = {
+                            "attempted": True,
+                            "status_code": duplicate.status_code,
+                        }
                     message_index += 1
-                    if response_lost_after_commit and not lost_injected:
-                        lost_injected = True
                     final_status, pause = await self._wait(run_id)
 
                 calls, state, response_text, run_tokens, run_cost_cny = await self._read_trace(
@@ -350,7 +358,7 @@ class DurableRunHttpTransport:
                 "pauses": all_pauses,
                 "outcome": final_outcome,
                 "transcript": transcript,
-                "response_lost_after_commit_injected": lost_injected,
+                "duplicate_approval_resume": duplicate_resume,
                 "usage": {
                     "total_tokens": total_tokens,
                     "cost_cny": float(cost_cny),
