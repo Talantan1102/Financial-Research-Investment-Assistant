@@ -175,6 +175,15 @@ class AssertionEngine:
                 return len(actual) == expected
             except TypeError:
                 return False
+        if operator == "greater_than":
+            if (
+                isinstance(actual, bool)
+                or isinstance(expected, bool)
+                or not isinstance(actual, (int, float))
+                or not isinstance(expected, (int, float))
+            ):
+                return False
+            return actual > expected
         if operator == "ordered_subsequence":
             return self._ordered_subsequence(actual, expected)
         if operator == "subset":

@@ -365,40 +365,101 @@ POSITIVE_OBSERVATIONS: dict[str, dict[str, Any]] = {
     "B6-10": _observation(
         run={
             "status": "completed",
-            "approval": {
-                "invalidated_reason": "expired",
-                "status": "expired",
-                "expires_at": "2026-07-28T10:09:59+08:00",
-            },
+            "pauses": [
+                {
+                    "pause_type": "approval",
+                    "decision": "approved",
+                    "created_at": "2026-07-28T02:00:00+00:00",
+                    "resolved_at": "2026-07-28T02:11:00+00:00",
+                    "elapsed_seconds": 660,
+                    "request": {"tool_calls": [{"name": "place_paper_order"}]},
+                    "response": {"approved": True},
+                }
+            ],
         },
-        tools={"calls": [], "eligibility": {"revalidated_after_expiry": True}},
+        tools={
+            "calls": [
+                {
+                    "tool_name": "check_order_eligibility",
+                    "arguments": {"ts_code": "300750.SZ", "side": "buy"},
+                    "status": "completed",
+                    "result": {"allowed": True, "market": "chinext", "side": "buy"},
+                },
+                {
+                    "tool_name": "get_paper_account",
+                    "arguments": {},
+                    "status": "completed",
+                    "result": {"available_cash": "1000000.00", "frozen_cash": "0.00"},
+                },
+                {
+                    "tool_name": "place_paper_order",
+                    "arguments": {
+                        "side": "buy",
+                        "ts_code": "300750.SZ",
+                        "name": "宁德时代",
+                        "quantity": 100,
+                        "order_type": "limit",
+                        "limit_price": "210",
+                    },
+                    "status": "approval_required",
+                    "result": None,
+                },
+            ]
+        },
         before={
             "orders": {"count": 0},
-            "confirmations": {"current": {"status": "pending"}},
+            "funds": {"available_cash": "1000000.00", "frozen_cash": "0.00"},
         },
         after={
             "orders": {"count": 0},
-            "confirmations": {"current": {"status": "expired"}},
+            "funds": {"available_cash": "1000000.00", "frozen_cash": "0.00"},
         },
-        answer_text="这次确认已过期，复核状态后需要重新确认。",
+        answer_text="这次确认已过期，旧确认没有生成订单；请重新确认后我才能继续。",
     ),
     "B6-18": _observation(
-        run={"status": "completed"},
+        run={
+            "status": "completed",
+            "pauses": [
+                {
+                    "pause_type": "approval",
+                    "decision": "approved",
+                    "request": {"tool_calls": [{"name": "place_paper_order"}]},
+                    "response": {"approved": True},
+                }
+            ],
+        },
         tools={
-            "calls": ["get_security_status"],
-            "security_status": {"trading_status": "suspended", "accept_new_order": False},
+            "calls": [
+                {
+                    "tool_name": "check_order_eligibility",
+                    "arguments": {"ts_code": "000001.SZ", "side": "buy"},
+                    "status": "completed",
+                    "result": {"allowed": True, "market": "main", "side": "buy"},
+                },
+                {
+                    "tool_name": "place_paper_order",
+                    "arguments": {
+                        "side": "buy",
+                        "ts_code": "000001.SZ",
+                        "name": "平安银行",
+                        "quantity": 100,
+                        "order_type": "limit",
+                        "limit_price": "20",
+                    },
+                    "status": "failed",
+                    "result": None,
+                },
+            ]
         },
         before={
             "orders": {"count": 0},
-            "funds": {"frozen_cash": 0.0},
-            "permission_links": {"count": 0},
+            "funds": {"available_cash": "1000000.00", "frozen_cash": "0.00"},
         },
         after={
             "orders": {"count": 0},
-            "funds": {"frozen_cash": 0.0},
-            "permission_links": {"count": 0},
+            "funds": {"available_cash": "1000000.00", "frozen_cash": "0.00"},
         },
-        answer_text="证券处于停牌状态，现在不能提交，本次没有下单。",
+        answer_text="真实下单服务返回证券当前停牌，本次没有下单，也不会在复牌后自动买入。",
     ),
     "B7-07": _observation(
         run={
@@ -987,6 +1048,36 @@ def test_b6_06_seed_records_real_permission_tools_and_action_required() -> None:
     assert "action_link" not in run
     assert "permission_links" not in observation["database"]["before"]
     assert "permission_links" not in observation["database"]["after"]
+
+
+def test_b6_18_positive_control_scores_only_agent_visible_business_evidence() -> None:
+    observation = POSITIVE_OBSERVATIONS["B6-18"]
+    place_call = observation["tools"]["calls"][-1]
+
+    assert place_call["status"] == "failed"
+    assert place_call["error_code"] is None
+    assert place_call["error_message"] is None
+    assert place_call["error"] is None
+
+    result = _evaluate("B6-18", observation)
+
+    assert result.trial_status is TrialStatus.VALID
+    assert result.task_pass is True
+    assert result.raw_score == 100
+    assert result.task_score == 100
+
+    with_unscored_service_detail = deepcopy(observation)
+    mutated_place = with_unscored_service_detail["tools"]["calls"][-1]
+    mutated_place["error_code"] = "provider_specific_code"
+    mutated_place["error_message"] = "provider-specific wording"
+    with_unscored_service_detail["tools"] = _projected_tools(
+        {"calls": with_unscored_service_detail["tools"]["calls"]}
+    )
+    mutated_result = _evaluate("B6-18", with_unscored_service_detail)
+
+    assert mutated_result.task_pass is True
+    assert mutated_result.raw_score == 100
+    assert mutated_result.task_score == 100
 
 
 def test_b4_08_mutation_leaks_via_answer_without_inventing_a_read_tool() -> None:

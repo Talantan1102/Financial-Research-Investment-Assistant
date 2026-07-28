@@ -4,18 +4,22 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import json
 import re
 import time
 from collections.abc import Awaitable, Callable
+from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal, Protocol
 from uuid import UUID
 
 from eval.chatloop.case_schema import (
     ConversationCase,
+    validate_approval_delay_fault,
     validate_approval_pause_fault,
     validate_order_alias,
+    validate_suspended_quote_fault,
 )
 from eval.chatloop.environment import EvalActor, TrialEnvironment
 from eval.chatloop.faults import (
@@ -193,17 +197,18 @@ class DurableHttpBusinessExecutor:
             progress_callback=self._progress_callback,
             approval_pause_callback=pause_callback,
         )
-        observed = await transport.execute_messages(
-            case_id=context.case.case_id,
-            messages=_render_environment_messages(
-                context.case.user_messages,
-                context.environment.manifest.order_aliases,
-                order_alias_owners=context.environment.manifest.order_alias_owners,
-                requester_user_id=context.actor.user_id,
-            ),
-            run_idx=context.environment.trial_index,
-            response_lost_after_commit=(context.transport_fault.response_lost_after_commit),
-        )
+        async with _suspended_quote_scope(context):
+            observed = await transport.execute_messages(
+                case_id=context.case.case_id,
+                messages=_render_environment_messages(
+                    context.case.user_messages,
+                    context.environment.manifest.order_aliases,
+                    order_alias_owners=context.environment.manifest.order_alias_owners,
+                    requester_user_id=context.actor.user_id,
+                ),
+                run_idx=context.environment.trial_index,
+                response_lost_after_commit=(context.transport_fault.response_lost_after_commit),
+            )
         ledger = tuple(
             {
                 "tool_name": call.get("tool_name", "unknown"),
@@ -280,14 +285,40 @@ def _approval_pause_callback(
     context: BusinessExecutionContext,
 ) -> Callable[[str, Any], Awaitable[None]] | None:
     plans = [plan for plan in context.fault_plans if plan.mode == "approval_pause"]
-    if not plans:
+    delay_plans = [plan for plan in context.fault_plans if plan.mode == "approval_delay"]
+    if not plans and not delay_plans:
         return None
     if context.case.initial_state.execution_mode != "durable":
-        raise ValueError("approval_pause requires execution_mode=durable")
-    if len(plans) != 1:
+        mode = "approval_pause" if plans else "approval_delay"
+        raise ValueError(f"{mode} requires execution_mode=durable")
+    if plans and len(plans) != 1:
         raise ValueError("durable eval supports at most one approval_pause plan")
-    plan = plans[0]
-    alias, quantity = validate_approval_pause_fault(plan.target, plan.payload)
+    if len(delay_plans) > 1:
+        raise ValueError("durable eval supports at most one approval_delay plan")
+    callbacks: list[Callable[[str, Any], Awaitable[None]]] = []
+
+    if plans:
+        plan = plans[0]
+        alias, quantity = validate_approval_pause_fault(plan.target, plan.payload)
+        callbacks.append(_settlement_pause_callback(context, alias=alias, quantity=quantity))
+    if delay_plans:
+        plan = delay_plans[0]
+        elapsed_seconds = validate_approval_delay_fault(plan.target, plan.payload)
+        callbacks.append(_approval_delay_apply_callback(context, elapsed_seconds=elapsed_seconds))
+
+    async def apply(run_id: str, pause: Any) -> None:
+        for callback in callbacks:
+            await callback(run_id, pause)
+
+    return apply
+
+
+def _settlement_pause_callback(
+    context: BusinessExecutionContext,
+    *,
+    alias: str,
+    quantity: int,
+) -> Callable[[str, Any], Awaitable[None]]:
     requester_user_id = context.actor.user_id
     if requester_user_id is None:
         raise PermissionError("approval_pause requires an authenticated requester")
@@ -330,6 +361,98 @@ def _approval_pause_callback(
         applied = True
 
     return apply
+
+
+def _approval_delay_apply_callback(
+    context: BusinessExecutionContext,
+    *,
+    elapsed_seconds: int,
+) -> Callable[[str, Any], Awaitable[None]]:
+    requester_user_id = context.actor.user_id
+    if requester_user_id is None:
+        raise PermissionError("approval_delay requires an authenticated requester")
+    applied = False
+
+    async def apply(run_id: str, pause: Any) -> None:
+        nonlocal applied
+        if applied:
+            raise RuntimeError("approval-delay hook was invoked more than once")
+        if pause.pause_type != "approval":
+            raise RuntimeError("approval_delay requires an approval pause")
+        if UUID(str(run_id)) != UUID(str(pause.run_id)):
+            raise RuntimeError("approval_delay pause does not belong to the observed Run")
+        paused_calls = pause.request_payload.get("tool_calls", [])
+        place_calls = [
+            call
+            for call in paused_calls
+            if isinstance(call, dict) and call.get("name") == "place_paper_order"
+        ]
+        if len(place_calls) != 1:
+            raise RuntimeError("approval_delay requires exactly one paused place_paper_order")
+        await context.environment.apply_approval_delay(
+            run_id=UUID(str(run_id)),
+            pause_id=UUID(str(pause.id)),
+            elapsed_seconds=elapsed_seconds,
+            requester_user_id=requester_user_id,
+        )
+        applied = True
+
+    return apply
+
+
+_SUSPENDED_QUOTE_LOCK = asyncio.Lock()
+
+
+@asynccontextmanager
+async def _suspended_quote_scope(context: BusinessExecutionContext):
+    plans = [plan for plan in context.fault_plans if plan.mode == "suspended_quote"]
+    if not plans:
+        yield
+        return
+    if context.case.initial_state.execution_mode != "durable":
+        raise ValueError("suspended_quote requires execution_mode=durable")
+    if len(plans) != 1:
+        raise ValueError("durable eval supports at most one suspended_quote plan")
+    ts_code = validate_suspended_quote_fault(plans[0].target, plans[0].payload)
+
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    import pandas as pd
+    from app.services.paper_trading.quote_provider import TushareRealtimeQuoteProvider
+
+    now = datetime.now(ZoneInfo("Asia/Shanghai"))
+
+    def suspended_fetch(requested_ts_code: str) -> Any:
+        if requested_ts_code != ts_code:
+            raise RuntimeError("eval suspended quote requested an unexpected security")
+        row: dict[str, object] = {
+            "TS_CODE": ts_code,
+            "NAME": "评估停牌证券",
+            "DATE": now.strftime("%Y%m%d"),
+            "TIME": now.strftime("%H:%M:%S"),
+            "PRE_CLOSE": "11.20",
+            "PRICE": "0",
+        }
+        for level in range(1, 6):
+            row.update(
+                {
+                    f"B{level}_P": "0",
+                    f"B{level}_V": "0",
+                    f"A{level}_P": "0",
+                    f"A{level}_V": "0",
+                }
+            )
+        return pd.DataFrame([row])
+
+    async with _SUSPENDED_QUOTE_LOCK:
+        provider_class: Any = TushareRealtimeQuoteProvider
+        original = inspect.getattr_static(provider_class, "_sdk_fetch")
+        provider_class._sdk_fetch = staticmethod(suspended_fetch)
+        try:
+            yield
+        finally:
+            provider_class._sdk_fetch = original
 
 
 class DirectToolLoopBusinessExecutor:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
@@ -14,7 +14,7 @@ from app.models.investor_suitability import (
 )
 from app.models.paper_account import PaperAccount
 from app.models.paper_order import PaperFill, PaperOrder
-from app.models.run import Run, RunEvent, RunMessage, RunSession
+from app.models.run import Run, RunEvent, RunMessage, RunPause, RunSession
 from app.models.run_scheduling import RunOutbox, RunTenantScheduling
 from app.models.user import User
 from app.models.watchlist import WatchlistAudit
@@ -737,6 +737,61 @@ async def test_cleanup_tracks_and_removes_durable_run_rows(
         assert await session.get(RunEvent, created.events[0].id) is None
         assert await session.get(RunOutbox, env.manifest.run_outbox_ids[0]) is None
         assert await session.get(RunTenantScheduling, env.tenant_id) is None
+
+
+@pytest.mark.asyncio
+async def test_approval_delay_ages_only_the_requesters_real_unresolved_pause(
+    environment_manager,
+    disposable_eval_async_session_factory,
+) -> None:
+    env = await environment_manager.prepare(_case("B6-06"), trial_index=0)
+    created = await RunService(disposable_eval_async_session_factory).create_run(
+        CreateRunCommand(
+            tenant_id=env.tenant_id,
+            actor_id=env.primary_user_id,
+            session_id=None,
+            prompt="宁德时代买100股，限价210",
+            idempotency_key=f"eval-delay-{uuid4().hex}",
+            replaces_run_id=None,
+        )
+    )
+    pause_id = uuid4()
+    async with disposable_eval_async_session_factory() as session, session.begin():
+        session.add(
+            RunPause(
+                id=pause_id,
+                run_id=created.run.id,
+                pause_no=1,
+                pause_type="approval",
+                request_payload={"tool_calls": [{"name": "place_paper_order"}]},
+                continuation_payload={},
+            )
+        )
+
+    before = datetime.now(UTC).replace(tzinfo=None)
+    await env.apply_approval_delay(
+        run_id=created.run.id,
+        pause_id=pause_id,
+        elapsed_seconds=660,
+        requester_user_id=env.primary_user_id,
+    )
+
+    async with disposable_eval_async_session_factory() as session:
+        pause = await session.get(RunPause, pause_id)
+    assert pause is not None
+    assert pause.resolved_at is None
+    assert pause.created_at <= before - timedelta(seconds=659)
+    assert pause.created_at >= before - timedelta(seconds=665)
+
+    with pytest.raises(PermissionError, match="requester"):
+        await env.apply_approval_delay(
+            run_id=created.run.id,
+            pause_id=pause_id,
+            elapsed_seconds=660,
+            requester_user_id=uuid4(),
+        )
+
+    await env.cleanup()
 
 
 @pytest.mark.asyncio

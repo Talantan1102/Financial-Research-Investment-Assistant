@@ -663,11 +663,17 @@ class DurableRunHttpTransport:
     def _pause_trace(pause: Any) -> dict[str, Any]:
         response = dict(pause.response_payload or {})
         approved = response.get("approved")
+        created_at = pause.created_at
+        resolved_at = pause.resolved_at
         trace: dict[str, Any] = {
             "pause_type": str(pause.pause_type),
             "request": dict(pause.request_payload),
             "response": response,
+            "created_at": created_at.isoformat(),
+            "resolved_at": resolved_at.isoformat() if resolved_at is not None else None,
         }
+        if resolved_at is not None:
+            trace["elapsed_seconds"] = int((resolved_at - created_at).total_seconds())
         if type(approved) is bool:
             trace["decision"] = "approved" if approved else "rejected"
         calls = pause.request_payload.get("tool_calls", [])

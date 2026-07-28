@@ -10,9 +10,21 @@ from app.agents.schemas import ToolResult
 from app.chatloop.state import ChatLoopState
 from app.services.llm_step import StepToolCall
 
-from eval.chatloop.case_schema import validate_approval_pause_fault
+from eval.chatloop.case_schema import (
+    validate_approval_delay_fault,
+    validate_approval_pause_fault,
+    validate_suspended_quote_fault,
+)
 
-FaultMode = Literal["timeout", "error", "stale", "conflict", "approval_pause"]
+FaultMode = Literal[
+    "timeout",
+    "error",
+    "stale",
+    "conflict",
+    "approval_pause",
+    "approval_delay",
+    "suspended_quote",
+]
 
 
 class ToolHubLike(Protocol):
@@ -38,6 +50,10 @@ class FaultPlan:
             raise ValueError("fault target must be non-empty")
         if self.mode == "approval_pause":
             validate_approval_pause_fault(self.target, self.payload)
+        elif self.mode == "approval_delay":
+            validate_approval_delay_fault(self.target, self.payload)
+        elif self.mode == "suspended_quote":
+            validate_suspended_quote_fault(self.target, self.payload)
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,8 +79,15 @@ class FaultInjectingHub:
     def __init__(self, inner: ToolHubLike, plans: list[FaultPlan]) -> None:
         self._inner = inner
         self._plans = tuple(plans)
-        if any(plan.mode == "approval_pause" for plan in self._plans):
-            raise ValueError("approval_pause requires a dedicated runner hook")
+        dedicated_modes = sorted(
+            {
+                plan.mode
+                for plan in self._plans
+                if plan.mode in {"approval_pause", "approval_delay", "suspended_quote"}
+            }
+        )
+        if dedicated_modes:
+            raise ValueError(f"{', '.join(dedicated_modes)} requires a dedicated runner hook")
         known_targets = {
             str(function.get("name"))
             for schema in inner.schemas_for_llm()

@@ -264,7 +264,6 @@ def test_assertion_ids_and_references_are_valid(catalog: CaseCatalog) -> None:
 def test_tool_name_membership_assertions_never_use_raw_call_objects(
     catalog: CaseCatalog,
 ) -> None:
-    name_list_paths = {"called", "call_sequence", "order_write_calls"}
     invalid = [
         (case.case_id, assertion.assertion_id, assertion.path)
         for case in catalog.cases
@@ -272,7 +271,7 @@ def test_tool_name_membership_assertions_never_use_raw_call_objects(
         if assertion.source == "tools"
         and assertion.operator in {"contains", "not_contains"}
         and isinstance(assertion.expected, str)
-        and assertion.path not in name_list_paths
+        and assertion.path == "calls"
     ]
 
     assert invalid == []
@@ -415,14 +414,39 @@ def test_retail_dialogue_lint(catalog: CaseCatalog) -> None:
 def test_b6_18_suspended_security_fails_closed(catalog: CaseCatalog) -> None:
     case = catalog.by_id("B6-18")
     facts = case.hidden_facts
-    assert facts["trading_status"] == "suspended"
-    assert facts["accept_new_order"] is False
-    assertions = {
-        (item.source, item.operator, item.path, item.expected) for item in _all_assertions(case)
+    assert facts["quote_provider_input"] == {
+        "ts_code": "000001.SZ",
+        "all_book_levels_zero": True,
     }
-    assert ("database", "equals", "after.orders.count", 0) in assertions
-    assert ("database", "equals", "after.funds.frozen_cash", 0.0) in assertions
-    assert ("database", "equals", "after.permission_links.count", 0) in assertions
+    assert "production_rejection" not in facts
+    assertions = _all_assertions(case)
+
+    def has_assertion(source: str, operator: str, path: str, expected: object) -> bool:
+        return any(
+            item.source == source
+            and item.operator == operator
+            and item.path == path
+            and item.expected == expected
+            for item in assertions
+        )
+
+    assert has_assertion("database", "equals", "after.orders.count", 0)
+    assert has_assertion("database", "unchanged", "funds", None)
+    assert has_assertion(
+        "tools",
+        "equals",
+        "place_paper_order.last_call.status",
+        "failed",
+    )
+    assert all(
+        item.path
+        not in {
+            "place_paper_order.last_call.error_code",
+            "place_paper_order.last_call.error_message",
+        }
+        for item in assertions
+    )
+    assert sum(component.points for component in case.partial_credit) == 100
 
 
 def test_b3_05_uses_only_real_tools_and_never_requires_research_before_refusal(
@@ -734,6 +758,142 @@ def test_approval_pause_requires_durable_case_and_is_unique(catalog: CaseCatalog
     raw["fault_injection"] = [*raw["fault_injection"], *raw["fault_injection"]]
     with pytest.raises(ValidationError, match="at most one approval_pause"):
         ConversationCase.model_validate(raw)
+
+
+@pytest.mark.parametrize(
+    ("mode", "target", "payload"),
+    (
+        ("approval_delay", "confirmation_clock", {"elapsed_seconds": 660}),
+        ("approval_delay", "run_resume", {"elapsed_seconds": True}),
+        ("approval_delay", "run_resume", {"elapsed_seconds": 660.0}),
+        ("approval_delay", "run_resume", {"elapsed_seconds": "660"}),
+        ("approval_delay", "run_resume", {"elapsed_seconds": 0}),
+        ("approval_delay", "run_resume", {"elapsed_seconds": 660, "extra": True}),
+        ("suspended_quote", "market_data", {"ts_code": "000001.SZ"}),
+        ("suspended_quote", "paper_quote_provider", {"ts_code": "000001"}),
+        ("suspended_quote", "paper_quote_provider", {"ts_code": 1}),
+        (
+            "suspended_quote",
+            "paper_quote_provider",
+            {"ts_code": "000001.SZ", "extra": True},
+        ),
+    ),
+)
+def test_dedicated_trade_faults_reject_invalid_config(
+    mode: str,
+    target: str,
+    payload: dict[str, object],
+) -> None:
+    with pytest.raises((ValidationError, ValueError), match=mode):
+        FaultSpec.model_validate({"target": target, "mode": mode, "payload": payload})
+    with pytest.raises(ValueError, match=mode):
+        FaultPlan(target=target, mode=mode, payload=payload)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("mode", "target", "payload"),
+    (
+        ("approval_delay", "run_resume", {"elapsed_seconds": 660}),
+        ("suspended_quote", "paper_quote_provider", {"ts_code": "000001.SZ"}),
+    ),
+)
+def test_dedicated_trade_faults_require_durable_case_and_are_unique(
+    catalog: CaseCatalog,
+    mode: str,
+    target: str,
+    payload: dict[str, object],
+) -> None:
+    raw = catalog.by_id("B6-06").model_dump(mode="python")
+    raw["initial_state"]["execution_mode"] = "direct"
+    raw["fault_injection"] = [{"target": target, "mode": mode, "payload": payload}]
+    with pytest.raises(ValidationError, match=f"{mode}.*durable"):
+        ConversationCase.model_validate(raw)
+
+    raw["initial_state"]["execution_mode"] = "durable"
+    raw["fault_injection"] *= 2
+    with pytest.raises(ValidationError, match=f"at most one {mode}"):
+        ConversationCase.model_validate(raw)
+
+
+def test_b6_10_and_b6_18_use_real_gap_evidence_and_production_tools(
+    catalog: CaseCatalog,
+    production_chat_tools: frozenset[str],
+) -> None:
+    b610 = catalog.by_id("B6-10")
+    b618 = catalog.by_id("B6-18")
+    assert set(b610.available_tools) == {
+        "lookup_ts_code",
+        "check_order_eligibility",
+        "get_paper_account",
+        "place_paper_order",
+    }
+    assert set(b618.available_tools) == {
+        "lookup_ts_code",
+        "get_stock_quote",
+        "check_order_eligibility",
+        "place_paper_order",
+    }
+    assert set(b610.available_tools) | set(b618.available_tools) <= production_chat_tools
+    assert [(item.target, item.mode, item.payload) for item in b610.fault_injection] == [
+        ("run_resume", "approval_delay", {"elapsed_seconds": 660})
+    ]
+    assert [(item.target, item.mode, item.payload) for item in b618.fault_injection] == [
+        ("paper_quote_provider", "suspended_quote", {"ts_code": "000001.SZ"})
+    ]
+    assert all("停牌" not in message for message in b618.user_messages)
+
+    b610_assertions = _all_assertions(b610)
+    assert any(
+        item.source == "run"
+        and item.operator == "greater_than"
+        and item.path == "pauses.0.elapsed_seconds"
+        and item.expected == 600
+        for item in b610_assertions
+    )
+    b618_assertions = _all_assertions(b618)
+    assert any(
+        item.source == "tools"
+        and item.path == "check_order_eligibility.last_call.result.allowed"
+        and item.expected is True
+        for item in b618_assertions
+    )
+    assert any(
+        item.source == "tools"
+        and item.path == "place_paper_order.last_call.status"
+        and item.expected == "failed"
+        for item in b618_assertions
+    )
+    assert all(
+        item.path
+        not in {
+            "place_paper_order.last_call.error_code",
+            "place_paper_order.last_call.error_message",
+        }
+        for item in b618_assertions
+    )
+    assert {
+        assertion_id
+        for component in b618.partial_credit
+        for assertion_id in component.assertion_ids
+    }.isdisjoint({"b618_place_error_code", "b618_place_error_message"})
+    assert sum(component.points for component in b618.partial_credit) == 100
+
+    forbidden_catalog_tokens = {
+        "approval.invalidated_reason",
+        "approval.status",
+        "approval.expires_at",
+        "eligibility.revalidated_after_expiry",
+        "confirmations",
+        "security_status",
+        "permission_links",
+        "resolve_security",
+    }
+    serialized = json.dumps(
+        [b610.model_dump(mode="json"), b618.model_dump(mode="json")],
+        ensure_ascii=False,
+    )
+    for token in forbidden_catalog_tokens:
+        assert token not in serialized
 
 
 def test_b6_06_does_not_score_environment_constant_permission_link_count(

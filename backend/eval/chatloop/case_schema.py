@@ -19,12 +19,37 @@ __all__ = [
     "GraderSpec",
     "ScoreComponent",
     "SuiteType",
+    "validate_approval_delay_fault",
     "validate_approval_pause_fault",
     "validate_order_alias",
+    "validate_suspended_quote_fault",
 ]
 
 
 _ORDER_ALIAS_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+_TS_CODE_PATTERN = re.compile(r"\d{6}\.(?:SH|SZ|BJ)")
+
+
+def validate_approval_delay_fault(target: Any, payload: Any) -> int:
+    if target != "run_resume":
+        raise ValueError("approval_delay target must be run_resume")
+    if type(payload) is not dict or set(payload) != {"elapsed_seconds"}:
+        raise ValueError("approval_delay payload must contain exactly elapsed_seconds")
+    elapsed_seconds = payload["elapsed_seconds"]
+    if type(elapsed_seconds) is not int or elapsed_seconds <= 0:
+        raise ValueError("approval_delay elapsed_seconds must be a positive strict integer")
+    return elapsed_seconds
+
+
+def validate_suspended_quote_fault(target: Any, payload: Any) -> str:
+    if target != "paper_quote_provider":
+        raise ValueError("suspended_quote target must be paper_quote_provider")
+    if type(payload) is not dict or set(payload) != {"ts_code"}:
+        raise ValueError("suspended_quote payload must contain exactly ts_code")
+    ts_code = payload["ts_code"]
+    if type(ts_code) is not str or _TS_CODE_PATTERN.fullmatch(ts_code) is None:
+        raise ValueError("suspended_quote ts_code must be a canonical security code")
+    return ts_code
 
 
 def validate_order_alias(value: Any) -> str:
@@ -77,6 +102,7 @@ class AssertionSpec(_StrictModel):
         "contains",
         "not_contains",
         "count_equals",
+        "greater_than",
         "ordered_subsequence",
         "subset",
     ] = Field(description="对实际值和期望值执行的比较操作")
@@ -119,6 +145,8 @@ class FaultSpec(_StrictModel):
         "stale",
         "conflict",
         "approval_pause",
+        "approval_delay",
+        "suspended_quote",
         "response_lost_after_commit",
     ] = Field(description="评估环境注入的故障模式")
     payload: dict[str, Any] = Field(default_factory=dict, description="故障模式所需的附加参数")
@@ -127,6 +155,10 @@ class FaultSpec(_StrictModel):
     def validate_approval_pause(self) -> FaultSpec:
         if self.mode == "approval_pause":
             validate_approval_pause_fault(self.target, self.payload)
+        elif self.mode == "approval_delay":
+            validate_approval_delay_fault(self.target, self.payload)
+        elif self.mode == "suspended_quote":
+            validate_suspended_quote_fault(self.target, self.payload)
         return self
 
 
@@ -287,11 +319,10 @@ class ConversationCase(_StrictModel):
 
     @model_validator(mode="after")
     def validate_approval_pause_case_scope(self) -> ConversationCase:
-        approval_pauses = [
-            fault for fault in self.fault_injection if fault.mode == "approval_pause"
-        ]
-        if len(approval_pauses) > 1:
-            raise ValueError("at most one approval_pause fault is allowed per case")
-        if approval_pauses and self.initial_state.execution_mode != "durable":
-            raise ValueError("approval_pause requires execution_mode=durable")
+        for mode in ("approval_pause", "approval_delay", "suspended_quote"):
+            dedicated = [fault for fault in self.fault_injection if fault.mode == mode]
+            if len(dedicated) > 1:
+                raise ValueError(f"at most one {mode} fault is allowed per case")
+            if dedicated and self.initial_state.execution_mode != "durable":
+                raise ValueError(f"{mode} requires execution_mode=durable")
         return self

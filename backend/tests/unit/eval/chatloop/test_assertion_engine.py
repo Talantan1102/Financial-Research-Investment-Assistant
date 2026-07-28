@@ -432,6 +432,36 @@ def test_count_equals_rejects_bool_expected_value(engine: AssertionEngine) -> No
     assert result.passed is False
 
 
+@pytest.mark.parametrize(
+    ("actual", "expected", "passed"),
+    (
+        (660, 600, True),
+        (600, 600, False),
+        (599, 600, False),
+        (True, 0, False),
+        ("660", 600, False),
+    ),
+)
+def test_greater_than_is_strict_and_rejects_bool_or_text(
+    engine: AssertionEngine,
+    actual: object,
+    expected: object,
+    passed: bool,
+) -> None:
+    result = engine.evaluate(
+        AssertionSpec(
+            assertion_id="strict-greater-than",
+            source="run",
+            operator="greater_than",
+            path="elapsed_seconds",
+            expected=expected,
+        ),
+        observation={"run": {"elapsed_seconds": actual}},
+    )
+
+    assert result.passed is passed
+
+
 def test_ordered_subsequence_treats_bool_and_int_items_as_distinct(
     engine: AssertionEngine,
 ) -> None:

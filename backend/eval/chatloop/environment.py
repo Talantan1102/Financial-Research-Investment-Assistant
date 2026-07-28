@@ -261,6 +261,42 @@ class TrialEnvironment:
         _extend_unique(self.manifest.fill_ids, [str(fill_id)])
         await self._refresh_owned_manifest()
 
+    async def apply_approval_delay(
+        self,
+        *,
+        run_id: UUID,
+        pause_id: UUID,
+        elapsed_seconds: int,
+        requester_user_id: UUID,
+    ) -> None:
+        """Age one owned unresolved approval pause using the real database row."""
+        if isinstance(elapsed_seconds, bool) or not isinstance(elapsed_seconds, int):
+            raise ValueError("eval approval delay must be a strict integer")
+        if elapsed_seconds <= 0:
+            raise ValueError("eval approval delay must be positive")
+        async with self.session_factory() as session, session.begin():
+            run = await session.scalar(
+                select(DurableRun).where(
+                    DurableRun.id == run_id,
+                    DurableRun.tenant_id == self.tenant_id,
+                    DurableRun.created_by_user_id == requester_user_id,
+                )
+            )
+            if run is None:
+                raise PermissionError("approval delay Run does not belong to requester")
+            pause = await session.scalar(
+                select(RunPause)
+                .where(RunPause.id == pause_id, RunPause.run_id == run_id)
+                .with_for_update()
+            )
+            if pause is None:
+                raise ValueError("approval delay pause does not belong to Run")
+            if pause.pause_type != "approval" or pause.resolved_at is not None:
+                raise ValueError("approval delay requires an unresolved approval pause")
+            pause.created_at = datetime.now(UTC).replace(tzinfo=None) - timedelta(
+                seconds=elapsed_seconds
+            )
+
     async def snapshot(self, *, actor_name: str = "creator") -> dict[str, Any]:
         """Read a deterministic, user-scoped financial state projection."""
         actor = self.actor(actor_name)

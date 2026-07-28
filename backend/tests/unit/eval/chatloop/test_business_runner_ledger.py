@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import inspect
 from types import SimpleNamespace
-from uuid import UUID
+from unittest.mock import AsyncMock
+from uuid import UUID, uuid4
 
+import eval.chatloop.business_runner as business_runner_module
 import pytest
 from app.chatloop.state import ChatLoopState
+from app.services.paper_trading.errors import PaperTradingError
+from app.services.paper_trading.quote_provider import TushareRealtimeQuoteProvider
 from eval.chatloop.business_runner import (
     _approval_pause_callback,
     _render_environment_messages,
@@ -95,6 +100,69 @@ def test_approval_pause_callback_rejects_cross_user_order_alias() -> None:
 
     with pytest.raises(PermissionError, match="order alias.*approval requester"):
         _approval_pause_callback(context)
+
+
+@pytest.mark.asyncio
+async def test_approval_delay_callback_ages_the_real_owned_pause_once() -> None:
+    requester_user_id = UUID("00000000-0000-4000-8000-000000000001")
+    run_id = uuid4()
+    pause_id = uuid4()
+    apply_delay = AsyncMock()
+    context = SimpleNamespace(
+        case=SimpleNamespace(initial_state=SimpleNamespace(execution_mode="durable")),
+        fault_plans=(
+            FaultPlan(
+                target="run_resume",
+                mode="approval_delay",
+                payload={"elapsed_seconds": 660},
+            ),
+        ),
+        actor=SimpleNamespace(user_id=requester_user_id),
+        environment=SimpleNamespace(apply_approval_delay=apply_delay),
+    )
+    callback = _approval_pause_callback(context)
+    assert callback is not None
+    pause = SimpleNamespace(
+        id=pause_id,
+        run_id=run_id,
+        pause_type="approval",
+        request_payload={"tool_calls": [{"name": "place_paper_order"}]},
+    )
+
+    await callback(str(run_id), pause)
+
+    apply_delay.assert_awaited_once_with(
+        run_id=run_id,
+        pause_id=pause_id,
+        elapsed_seconds=660,
+        requester_user_id=requester_user_id,
+    )
+    with pytest.raises(RuntimeError, match="approval-delay.*more than once"):
+        await callback(str(run_id), pause)
+
+
+@pytest.mark.asyncio
+async def test_suspended_quote_scope_uses_real_provider_mapping_and_restores_class() -> None:
+    scope_factory = getattr(business_runner_module, "_suspended_quote_scope", None)
+    assert scope_factory is not None, "eval-only suspended quote scope is missing"
+    original = inspect.getattr_static(TushareRealtimeQuoteProvider, "_sdk_fetch")
+    context = SimpleNamespace(
+        case=SimpleNamespace(initial_state=SimpleNamespace(execution_mode="durable")),
+        fault_plans=(
+            FaultPlan(
+                target="paper_quote_provider",
+                mode="suspended_quote",
+                payload={"ts_code": "000001.SZ"},
+            ),
+        ),
+    )
+
+    async with scope_factory(context):
+        with pytest.raises(PaperTradingError) as caught:
+            TushareRealtimeQuoteProvider().get_sync("000001.SZ")
+        assert caught.value.code == "suspended_security"
+
+    assert inspect.getattr_static(TushareRealtimeQuoteProvider, "_sdk_fetch") is original
 
 
 @pytest.mark.parametrize(

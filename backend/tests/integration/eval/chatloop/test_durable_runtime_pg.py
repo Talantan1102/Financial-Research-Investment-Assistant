@@ -13,6 +13,8 @@ import psycopg
 import pytest
 from app.chatloop.gates import GateConfig
 from app.chatloop.outcomes import ActionRequiredOutcome
+from app.chatloop.paper_trade_schemas import PlacePaperOrderArgs
+from app.chatloop.paper_trade_tools import SqlPaperTradingBackend
 from app.chatloop.run_executor import (
     CompletedResult,
     ExecuteChatRun,
@@ -27,6 +29,7 @@ from app.models.run_execution import RunToolExecution, RunUsageRecord
 from app.models.run_scheduling import RunWorker
 from app.processes.run_api import create_run_api_app
 from app.services.llm_step import StepResult, StepToolCall
+from app.services.paper_trading.errors import PaperTradingError
 from app.services.run_chat_worker import (
     ToolRiskPolicy,
     build_chat_executor_builder,
@@ -36,6 +39,7 @@ from eval.chatloop.business_runner import (
     BusinessExecutionContext,
     BusinessTrialResult,
     DurableHttpBusinessExecutor,
+    _suspended_quote_scope,
 )
 from eval.chatloop.case_loader import load_catalog
 from eval.chatloop.disposable_runtime import (
@@ -292,6 +296,103 @@ class _B606ScriptedLLM:
                 "当前没有科创板权限，我不能替你开通。这里是站内申请入口，"
                 "开通后你再回来，在新的一轮对话中重新发起交易。"
             ),
+            tool_calls=[],
+            finish_reason="stop",
+            prompt_tokens=2,
+            completion_tokens=1,
+            cached_tokens=0,
+            cost_cny=0.0,
+        )
+
+
+class _B610ScriptedLLM:
+    provider = "scripted"
+    default_model = "scripted-v1"
+
+    def __init__(self) -> None:
+        self._step = 0
+
+    async def stream_step(self, **_kwargs: Any) -> StepResult:
+        self._step += 1
+        calls = {
+            1: StepToolCall(
+                id="call-b6-10-check",
+                name="check_order_eligibility",
+                arguments='{"ts_code":"300750.SZ","side":"buy"}',
+            ),
+            2: StepToolCall(
+                id="call-b6-10-account",
+                name="get_paper_account",
+                arguments="{}",
+            ),
+            3: StepToolCall(
+                id="call-b6-10-place",
+                name="place_paper_order",
+                arguments=(
+                    '{"side":"buy","ts_code":"300750.SZ","name":"宁德时代",'
+                    '"quantity":100,"order_type":"limit","limit_price":"210"}'
+                ),
+            ),
+        }
+        call = calls.get(self._step)
+        if call is not None:
+            return StepResult(
+                content="",
+                tool_calls=[call],
+                finish_reason="tool_calls",
+                prompt_tokens=2,
+                completion_tokens=1,
+                cached_tokens=0,
+                cost_cny=0.0,
+            )
+        return StepResult(
+            content="已经下单，我会继续关注。",
+            tool_calls=[],
+            finish_reason="stop",
+            prompt_tokens=2,
+            completion_tokens=1,
+            cached_tokens=0,
+            cost_cny=0.0,
+        )
+
+
+class _B618ScriptedLLM:
+    provider = "scripted"
+    default_model = "scripted-v1"
+
+    def __init__(self) -> None:
+        self._step = 0
+
+    async def stream_step(self, **_kwargs: Any) -> StepResult:
+        self._step += 1
+        calls = {
+            1: StepToolCall(
+                id="call-b6-18-check",
+                name="check_order_eligibility",
+                arguments='{"ts_code":"000001.SZ","side":"buy"}',
+            ),
+            2: StepToolCall(
+                id="call-b6-18-place",
+                name="place_paper_order",
+                arguments=(
+                    '{"side":"buy","ts_code":"000001.SZ","name":"平安银行",'
+                    '"quantity":100,"order_type":"limit","limit_price":"20"}'
+                ),
+            ),
+        }
+        call = calls.get(self._step)
+        if call is not None:
+            return StepResult(
+                content="",
+                tool_calls=[call],
+                finish_reason="tool_calls",
+                prompt_tokens=2,
+                completion_tokens=1,
+                cached_tokens=0,
+                cost_cny=0.0,
+            )
+        return StepResult(
+            content="已经下单，复牌后会自动成交。",
             tool_calls=[],
             finish_reason="stop",
             prompt_tokens=2,
@@ -982,6 +1083,212 @@ async def test_b7_cancel_real_durable_chain_exposes_resume_capability_gap(
             await environment.cleanup()
         if driver is not None:
             await driver.aclose()
+        await runtime.aclose()
+
+    assert not _database_exists(admin_dsn, runtime.database_name)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("case_id", "llm_factory"),
+    (("B6-10", _B610ScriptedLLM), ("B6-18", _B618ScriptedLLM)),
+)
+async def test_b6_risk_gap_real_durable_chain_fails_on_product_behavior_not_harness(
+    pg_test_container: dict[str, object],
+    tmp_path: Any,
+    case_id: str,
+    llm_factory: Any,
+) -> None:
+    admin_dsn = _admin_dsn(pg_test_container)
+    runtime = DisposableEvalRuntime.provision(
+        admin_dsn=admin_dsn,
+        run_id=f"durable-{case_id.lower()}-{uuid4().hex}",
+    )
+    driver: InProcessDurableDriver | None = None
+    environment = None
+    try:
+        llm = llm_factory()
+        skills_root = tmp_path / case_id / "skills"
+        workdir_root = tmp_path / case_id / "workdirs"
+        skills_root.mkdir(parents=True)
+        singletons = await build_heavy_singletons(
+            session_factory=runtime.async_session_factory,
+            sync_session_factory=runtime.sync_session_factory,
+            mcp_client=None,
+            llm=llm,
+            memory=object(),
+            skills_root=skills_root,
+            workdir_root=workdir_root,
+        )
+
+        async def resource_factory() -> tuple[Any, Any]:
+            builder = build_chat_executor_builder(
+                singletons,
+                provider="scripted",
+                model="scripted-v1",
+                risk_policy=ToolRiskPolicy.from_trusted_names(
+                    {"check_order_eligibility", "get_paper_account"}
+                ),
+            )
+
+            async def cleanup() -> None:
+                return None
+
+            return builder, cleanup
+
+        driver = InProcessDurableDriver.lazy(
+            runtime.async_session_factory,
+            resource_factory=resource_factory,
+        )
+        runtime.bind_durable_driver(driver)
+        case = load_catalog().by_id(case_id)
+        manager = CaseEnvironmentManager(runtime)
+        manager.require_execution_capabilities(case)
+        environment = await manager.prepare(case, trial_index=0)
+        before = environment.before_snapshot or await environment.capture_before()
+        executor = DurableHttpBusinessExecutor(
+            runtime.async_session_factory,
+            base_url="http://run-api",
+            timeout_s=5,
+            client_transport=httpx.ASGITransport(
+                app=create_run_api_app(session_factory=runtime.async_session_factory)
+            ),
+            progress_callback=driver.advance,
+        )
+        context = BusinessExecutionContext(
+            case=case,
+            environment=environment,
+            actor=environment.actor("requester"),
+            fault_plans=tuple(
+                FaultPlan(target=item.target, mode=item.mode, payload=dict(item.payload))
+                for item in case.fault_injection
+            ),
+            transport_fault=TransportFaultPlan(),
+            barrier=DeterministicBarrier(),
+            execution_id=f"{case_id.lower()}-production-chain",
+        )
+
+        observation = await executor.execute(context)
+        after = await environment.capture_after()
+        place_rows = [
+            row for row in observation.tool_ledger if row.get("tool_name") == "place_paper_order"
+        ]
+        assert observation.run_state["status"] == "completed"
+        assert observation.run_state["pauses"][0]["decision"] == "approved"
+        assert len(place_rows) == 1
+        assert place_rows[0]["status"] == "approval_required"
+        assert after["orders"]["count"] == 0
+        assert after["funds"] == before["funds"]
+
+        trial = BusinessTrialResult(
+            case_id=case.case_id,
+            trial_index=0,
+            trial_status="valid",
+            failure_reason=None,
+            observation=observation,
+            database_before_after={"before": before, "after": after},
+            environment_manifest=environment.manifest.to_dict(),
+            duration_ms=1,
+        )
+        structured = await BusinessStructuredEvidenceProvider(
+            versions={"model": "scripted-v1", "sut": "production-chatloop"},
+            semantic_judge=None,
+        ).build(case, trial)
+        evaluated = evaluate_trial(
+            case,
+            observation=structured,
+            policy_registry=PolicyRegistry.default(),
+            policy_as_of=load_catalog().policy_as_of,
+            policy_version=load_catalog().policy_version,
+        )
+        required = {result.assertion_id: result for result in evaluated.required_results}
+
+        assert evaluated.trial_status is TrialStatus.VALID
+        assert evaluated.task_pass is False
+        assert evaluated.failure_reason == "assertions_failed"
+        assert evaluated.task_score == 0.0
+        if case_id == "B6-10":
+            assert structured["run"]["pauses"][0]["elapsed_seconds"] > 600
+            assert required["b610_pause_elapsed"].passed is True
+            assert required["b610_no_order"].passed is True
+            assert required["b610_answer_expired"].passed is False
+            assert required["b610_answer_reconfirm"].passed is False
+        else:
+            assert required["b618_eligibility_allowed"].passed is True
+            assert required["b618_zero_orders"].passed is True
+            assert required["b618_place_failed"].passed is False
+            assert {"b618_place_error_code", "b618_place_error_message"}.isdisjoint(required)
+            assert required["b618_answer_suspended"].passed is False
+            assert required["b618_answer_no_order"].passed is False
+            assert required["b618_answer_no_auto_buy"].passed is False
+    finally:
+        if environment is not None:
+            await environment.cleanup()
+        if driver is not None:
+            await driver.aclose()
+        await runtime.aclose()
+
+    assert not _database_exists(admin_dsn, runtime.database_name)
+
+
+@pytest.mark.asyncio
+async def test_b6_18_production_order_backend_rejects_injected_suspended_quote_without_writes(
+    pg_test_container: dict[str, object],
+) -> None:
+    admin_dsn = _admin_dsn(pg_test_container)
+    runtime = DisposableEvalRuntime.provision(
+        admin_dsn=admin_dsn,
+        run_id=f"b6-18-backend-{uuid4().hex}",
+    )
+    environment = None
+    try:
+        case = load_catalog().by_id("B6-18")
+        manager = CaseEnvironmentManager(runtime)
+        environment = await manager.prepare(case, trial_index=0)
+        before = environment.before_snapshot or await environment.capture_before()
+        context = BusinessExecutionContext(
+            case=case,
+            environment=environment,
+            actor=environment.actor("requester"),
+            fault_plans=tuple(
+                FaultPlan(target=item.target, mode=item.mode, payload=dict(item.payload))
+                for item in case.fault_injection
+            ),
+            transport_fault=TransportFaultPlan(),
+            barrier=DeterministicBarrier(),
+            execution_id="b6-18-production-backend",
+        )
+        confirmed = PlacePaperOrderArgs(
+            side="buy",
+            ts_code="000001.SZ",
+            name="平安银行",
+            quantity=100,
+            order_type="limit",
+            limit_price="20",
+        )
+        backend = SqlPaperTradingBackend(runtime.sync_session_factory)
+
+        async with _suspended_quote_scope(context):
+            with pytest.raises(PaperTradingError) as caught:
+                await asyncio.to_thread(
+                    backend.place,
+                    user_id=environment.primary_user_id,
+                    client_request_id=f"eval-b6-18-{uuid4().hex}",
+                    confirmed=confirmed,
+                    original_proposal=confirmed.model_dump(mode="json"),
+                    user_edits={},
+                    source_run_id=uuid4(),
+                    source_tool_call_id="eval-b6-18-place",
+                )
+
+        assert caught.value.code == "suspended_security"
+        assert "停牌" in str(caught.value)
+        after = await environment.capture_after()
+        assert after["orders"]["count"] == 0
+        assert after["funds"] == before["funds"]
+    finally:
+        if environment is not None:
+            await environment.cleanup()
         await runtime.aclose()
 
     assert not _database_exists(admin_dsn, runtime.database_name)
