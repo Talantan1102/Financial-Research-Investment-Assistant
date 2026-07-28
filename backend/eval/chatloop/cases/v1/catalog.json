@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "catalog_version": "2026.1",
+  "policy_version": "2026.1",
+  "policy_as_of": "2026-07-27",
+  "source_specs": [
+    "docs/superpowers/specs/conversational-agent-eval-cases/batch-1-foundations.md",
+    "docs/superpowers/specs/conversational-agent-eval-cases/batch-2-research-calculation.md",
+    "docs/superpowers/specs/conversational-agent-eval-cases/batch-3-investment-judgment.md",
+    "docs/superpowers/specs/conversational-agent-eval-cases/batch-4-personal-context.md",
+    "docs/superpowers/specs/conversational-agent-eval-cases/batch-5-watchlist.md",
+    "docs/superpowers/specs/conversational-agent-eval-cases/batch-6-trading-entitlements.md",
+    "docs/superpowers/specs/conversational-agent-eval-cases/batch-7-order-lifecycle.md",
+    "docs/superpowers/specs/conversational-agent-eval-cases/batch-8-cross-task-pressure.md"
+  ],
+  "source_spec_sha256": "4562364b90ed6480784d7e2fef2a88b78a537b7ab51f61e47069cb26ef4b69e5",
+  "total_count": 120,
+  "batches": [
+    {"batch": 1, "file": "batch-1.jsonl", "count": 22},
+    {"batch": 2, "file": "batch-2.jsonl", "count": 14},
+    {"batch": 3, "file": "batch-3.jsonl", "count": 10},
+    {"batch": 4, "file": "batch-4.jsonl", "count": 15},
+    {"batch": 5, "file": "batch-5.jsonl", "count": 12},
+    {"batch": 6, "file": "batch-6.jsonl", "count": 18},
+    {"batch": 7, "file": "batch-7.jsonl", "count": 17},
+    {"batch": 8, "file": "batch-8.jsonl", "count": 12}
+  ]
+}
