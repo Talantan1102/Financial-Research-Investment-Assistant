@@ -12,6 +12,7 @@ from uuid import UUID
 import pytest
 import pytest_asyncio
 from app.chatloop.gates import GateConfig
+from app.chatloop.outcomes import ActionRequiredOutcome
 from app.chatloop.run_executor import CompletedResult, FailedResult, PauseResult, RunUsage
 from app.chatloop.tool_hub import ToolHub
 from app.models.run import Run, RunAttempt, RunEvent, RunMessage, RunPause, RunSession
@@ -596,6 +597,52 @@ async def test_completed_result_commits_all_facts_atomically(
     assert usage.cost_cny == Decimal("0.12500000")
     assert trace.attrs_json["attempt_id"] == str(assignment.attempt_id)
     assert [event.event_type for event in events][-1] == "run.completed"
+    assert run.outcome_code is None
+    assert run.outcome_payload is None
+    assert events[-1].payload.get("outcome") is None
+
+
+@pytest.mark.asyncio
+async def test_completed_action_required_outcome_is_durable_and_emitted(
+    claimed: tuple[AttemptService, Any, UUID],
+    pg_async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    service, assignment, _user_id = claimed
+    loaded = await service.load_chat_execution(assignment)
+    outcome = ActionRequiredOutcome(
+        action_type="apply_market_permission",
+        action_url="/market-permissions/star/apply",
+        action_label="申请科创板权限",
+        resume_hint="申请完成后，回来重新发起下单。",
+        intent_summary="买入中芯国际 100 股。",
+    )
+    result = CompletedResult(
+        assignment.run_id,
+        assignment.attempt_id,
+        loaded.session_id,
+        "您暂未开通科创板权限。",
+        _usage(),
+        (),
+        (),
+        outcome=outcome,
+    )
+
+    await service.complete_chat(assignment, result)
+
+    async with pg_async_session_factory() as session:
+        run = await session.get(Run, assignment.run_id)
+        event = await session.scalar(
+            select(RunEvent)
+            .where(RunEvent.run_id == assignment.run_id, RunEvent.event_type == "run.completed")
+            .order_by(RunEvent.seq.desc())
+        )
+    expected = outcome.model_dump(mode="json")
+    assert run is not None
+    assert run.outcome_code == "action_required"
+    assert run.outcome_payload == expected
+    assert run.outcome_payload is not expected
+    assert event is not None
+    assert event.payload["outcome"] == expected
 
 
 @pytest.mark.asyncio

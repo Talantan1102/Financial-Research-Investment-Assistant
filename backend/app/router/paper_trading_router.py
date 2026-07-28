@@ -190,7 +190,7 @@ def list_orders(
     order_status: Annotated[OrderStatus | None, Query(alias="status")] = None,
     ts_code: Annotated[
         str | None,
-        Query(min_length=9, max_length=9, pattern=r"^\d{6}\.(?:SH|SZ)$"),
+        Query(min_length=9, max_length=9, pattern=r"^\d{6}\.(?:SH|SZ|BJ)$"),
     ] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0, le=10_000)] = 0,

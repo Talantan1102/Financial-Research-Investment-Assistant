@@ -10,6 +10,12 @@ from typing import cast
 from zoneinfo import ZoneInfo
 
 import pytest
+from app.models.investor_suitability import (
+    EntitlementStatus,
+    Market,
+    MarketAccessRule,
+    MarketEntitlement,
+)
 from app.models.paper_account import (
     PaperAccount,
     PaperAccountStatus,
@@ -82,6 +88,41 @@ def _service(session: Session, *, now: datetime = MORNING) -> PaperOrderService:
     )
 
 
+def _enable_main(session: Session, account: PaperAccount) -> None:
+    rule = session.scalar(
+        select(MarketAccessRule).where(
+            MarketAccessRule.market == Market.MAIN,
+            MarketAccessRule.rule_version == "test-main-v1",
+        )
+    )
+    if rule is None:
+        rule = MarketAccessRule(
+            market=Market.MAIN,
+            effective_from=OPEN_DAY,
+            minimum_average_assets_20d=None,
+            minimum_experience_months=None,
+            required_disclosure_version="main-risk-v1",
+            rule_version="test-main-v1",
+        )
+        session.add(rule)
+        session.flush()
+    session.add(
+        MarketEntitlement(
+            account_id=account.id,
+            account_generation=account.generation,
+            market=Market.MAIN,
+            status=EntitlementStatus.ENABLED,
+            can_buy=True,
+            can_sell=True,
+            can_subscribe=False,
+            rule_version=rule.rule_version,
+            enabled_at=MORNING,
+            restricted_at=None,
+        )
+    )
+    session.flush()
+
+
 def _confirmed_buy(
     session: Session,
     user_id: uuid.UUID,
@@ -91,6 +132,7 @@ def _confirmed_buy(
 ) -> tuple[PaperOrderService, PaperOrder, PaperAccount]:
     accounts = PaperAccountService(session)
     account = accounts.get_or_create(user_id=user_id)
+    _enable_main(session, account)
     service = _service(session, now=now)
     order, _ = service.prepare_order(
         user_id=user_id,
@@ -190,6 +232,7 @@ def _confirmed_sell(
     session: Session, user_id: uuid.UUID
 ) -> tuple[PaperOrderService, PaperOrder, list[PaperHoldingLot]]:
     account = PaperAccountService(session).get_or_create(user_id=user_id)
+    _enable_main(session, account)
     lots = [
         _add_sellable_lot(session, user_id=user_id, account=account, quantity=100, days_ago=2),
         _add_sellable_lot(session, user_id=user_id, account=account, quantity=100, days_ago=1),

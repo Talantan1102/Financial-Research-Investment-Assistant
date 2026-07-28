@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.models.user import User
 from app.router.auth_router import get_current_user_required
 from app.run_control.types import ResourceNotFound
+from app.schemas.run import parse_action_required_outcome
 from app.schemas.run_session import (
     RunMessageResponse,
     RunRevisionResponse,
@@ -98,6 +99,17 @@ async def get_session(
         revisions_next_cursor=detail.revisions_next_cursor,
         latest_run_id=detail.latest_run_id,
         latest_run_status=detail.latest_run_status,
+        latest_run_outcome=next(
+            (
+                parse_action_required_outcome(
+                    revision.run.outcome_payload,
+                    outcome_code=revision.run.outcome_code,
+                )
+                for revision in detail.revisions
+                if detail.latest_run_id is not None and revision.run.id == detail.latest_run_id
+            ),
+            None,
+        ),
     )
 
 

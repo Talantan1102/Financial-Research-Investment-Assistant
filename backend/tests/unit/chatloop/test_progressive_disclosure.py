@@ -16,6 +16,7 @@ import json
 
 from app.chatloop.events import LoopEvent
 from app.chatloop.state import ChatLoopState
+from app.chatloop.system_prompt import CHAT_SYSTEM_PROMPT
 from app.chatloop.tool_docs import (
     CORE_TOOLS,
     DEFERRED_TOOLS,
@@ -104,16 +105,16 @@ def _call(name: str, args: dict) -> StepToolCall:
 # ---------------------------------------------------------------------------
 
 
-def test_tool_docs_count_matches_paper_and_watchlist_catalog():
-    # 30 = 23 legacy tools + 7 paper-trading/watchlist tools.
-    assert len(TOOL_DOCS) == 30
+def test_tool_docs_count_matches_paper_watchlist_and_permission_catalog():
+    # 33 = 23 legacy tools + 7 paper-trading/watchlist tools + 3 permission tools.
+    assert len(TOOL_DOCS) == 33
 
 
 def test_core_and_deferred_partition_no_overlap():
     core = set(CORE_TOOLS)
     deferred = set(DEFERRED_TOOLS)
     assert len(CORE_TOOLS) == 9  # +dispatch_subagents(e2e 实测定为核心)+lookup_ts_code
-    assert len(DEFERRED_TOOLS) == 21
+    assert len(DEFERRED_TOOLS) == 24
     assert core & deferred == set()
     assert core | deferred == set(TOOL_DOCS.keys())
 
@@ -170,6 +171,29 @@ def test_deferred_thin_required_matches_real_required():
 # ---------------------------------------------------------------------------
 # thin_schema
 # ---------------------------------------------------------------------------
+
+
+def test_market_permission_tools_are_deferred_and_searchable():
+    expected = {
+        "get_market_entitlements": {},
+        "check_order_eligibility": {"ts_code": "string", "side": "string"},
+        "get_entitlement_application_link": {"market": "string"},
+    }
+
+    for name, required in expected.items():
+        assert name in DEFERRED_TOOLS
+        assert TOOL_DOCS[name].group == "deferred"
+        assert TOOL_DOCS[name].thin_required == required
+        assert name in [doc.name for doc in search_docs(name, k=1)]
+
+
+def test_system_prompt_requires_permission_check_and_no_implicit_continuation():
+    assert "check_order_eligibility" in CHAT_SYSTEM_PROMPT
+    assert "不得宣称已开通" in CHAT_SYSTEM_PROMPT
+    assert "不得调用或建议 enable_market_entitlement" in CHAT_SYSTEM_PROMPT
+    assert "无需征求写权限批准" in CHAT_SYSTEM_PROMPT
+    assert "不会自动恢复旧订单" in CHAT_SYSTEM_PROMPT
+    assert "新一轮" in CHAT_SYSTEM_PROMPT
 
 
 def test_thin_schema_keeps_required_name_and_type():
@@ -261,8 +285,8 @@ async def test_schemas_for_llm_groups_core_full_deferred_thin_search_last():
     schemas = hub.schemas_for_llm()
     names = [s["function"]["name"] for s in schemas]
 
-    # 总数 = 30 TOOL_DOCS + search_tools = 31
-    assert len(names) == 31
+    # 总数 = 33 TOOL_DOCS + search_tools = 34
+    assert len(names) == 34
     # search_tools 殿后
     assert names[-1] == "search_tools"
     # core 在前(顺序 = CORE_TOOLS)

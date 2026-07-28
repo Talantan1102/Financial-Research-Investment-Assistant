@@ -410,6 +410,15 @@ class AttemptService:
         self._validate_result_identity(assignment, result)
         if not result.final_text:
             raise ValueError("completed chat result must contain final text")
+        outcome_payload = (
+            None
+            if result.outcome is None
+            else self._bounded_json_object(
+                result.outcome.model_dump(mode="json"),
+                limit=MAX_RESULT_BYTES,
+                label="completed outcome",
+            )
+        )
         async with self._session_factory() as session, session.begin():
             attempt, run = await self._lock_command_context(session, assignment.attempt_id)
             now = cast(datetime, await session.scalar(select(_database_utc_now())))
@@ -424,20 +433,25 @@ class AttemptService:
             session.add(message)
             await session.flush()
             cast(Any, run).final_message_id = message.id
+            cast(Any, run).outcome_code = None if result.outcome is None else result.outcome.code
+            cast(Any, run).outcome_payload = outcome_payload
+            completed_event_payload: dict[str, Any] = {"final_message_id": str(message.id)}
+            if outcome_payload is not None:
+                completed_event_payload["outcome"] = deepcopy(outcome_payload)
             await self._persist_usage_and_trace(
                 session,
                 assignment,
                 result.usage,
                 now,
                 status="completed",
-                outputs={"final_message_id": str(message.id)},
+                outputs=completed_event_payload,
             )
             self._finish_attempt(attempt, AttemptStatus.COMPLETED, now)
             await RunMutationStore(session).transition(
                 run,
                 RunStatus.COMPLETED,
                 "run.completed",
-                {"final_message_id": str(message.id)},
+                completed_event_payload,
                 attempt_id=assignment.attempt_id,
             )
             cast(Any, run).finished_at = now

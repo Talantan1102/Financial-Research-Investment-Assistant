@@ -21,6 +21,7 @@ FIXTURE_PATH = (
 OFFICIAL_SOURCES = [
     "https://www.sse.com.cn/lawandrules/sselawsrules2025/fund/trading/c/c_20260424_10817739.shtml",
     "https://www.szse.cn/lawrules/rule/allrules/bussiness/t20260424_620190.html",
+    "https://www.bse.cn/uploads/6/file/public/202111/20211119182131_imqohh30d0.pdf",
 ]
 
 
@@ -29,7 +30,8 @@ def _valid_fixture() -> dict[str, Any]:
         "version": "test-v1",
         "effective_from": "2026-07-06",
         "defaults": {
-            "buy_lot_size": 100,
+            "minimum_order_quantity": 100,
+            "quantity_increment": 100,
             "price_tick": "0.01",
             "quote_freshness_seconds": 15,
         },
@@ -68,11 +70,13 @@ def test_rulebook_selects_board_and_risk_warning() -> None:
     main_risk_warning = _resolve(rulebook, risk_warning=True)
     star = _resolve(rulebook, board="star")
     chinext = _resolve(rulebook, board="chinext")
+    bse = _resolve(rulebook, board="bse")
 
     assert main.price_limit_ratio == Decimal("0.10")
     assert main_risk_warning.price_limit_ratio == Decimal("0.05")
     assert star.price_limit_ratio == Decimal("0.20")
     assert chinext.price_limit_ratio == Decimal("0.20")
+    assert bse.price_limit_ratio == Decimal("0.30")
 
 
 def test_rulebook_returns_exact_fixture_metadata_and_defaults() -> None:
@@ -81,7 +85,8 @@ def test_rulebook_returns_exact_fixture_metadata_and_defaults() -> None:
     assert rules.version == "cn-a-2026-07-06-v1"
     assert rules.effective_from == EFFECTIVE_DATE
     assert rules.side == "sell"
-    assert rules.buy_lot_size == 100
+    assert rules.minimum_order_quantity == 100
+    assert rules.quantity_increment == 100
     assert rules.price_tick == Decimal("0.01")
     assert rules.quote_freshness_seconds == 15
 
@@ -102,7 +107,8 @@ def test_rulebook_does_not_leak_float_values_into_ruleset() -> None:
 @pytest.mark.parametrize(
     ("path", "bad_value", "expected_context"),
     [
-        (("defaults", "buy_lot_size"), -100, "buy_lot_size"),
+        (("defaults", "minimum_order_quantity"), -100, "minimum_order_quantity"),
+        (("defaults", "quantity_increment"), -100, "quantity_increment"),
         (("defaults", "quote_freshness_seconds"), 0, "quote_freshness_seconds"),
         (("defaults", "price_tick"), "NaN", "price_tick"),
         (("boards", "main", "normal_limit_ratio"), "-0.10", "main.normal_limit_ratio"),
@@ -179,11 +185,13 @@ def test_rulebook_is_an_immutable_snapshot_of_fixture() -> None:
     defaults = cast(dict[str, Any], fixture["defaults"])
     boards = cast(dict[str, Any], fixture["boards"])
     main = cast(dict[str, Any], boards["main"])
-    defaults["buy_lot_size"] = 1
+    defaults["minimum_order_quantity"] = 1
+    defaults["quantity_increment"] = 1
     main["normal_limit_ratio"] = "0.99"
 
     resolved = _resolve(rulebook)
-    assert resolved.buy_lot_size == 100
+    assert resolved.minimum_order_quantity == 100
+    assert resolved.quantity_increment == 100
     assert resolved.price_limit_ratio == Decimal("0.10")
 
 
@@ -198,7 +206,7 @@ def test_special_regime_fails_closed() -> None:
 @pytest.mark.parametrize(
     ("overrides", "expected_message"),
     [
-        ({"board": "bse"}, "不支持的交易板块"),
+        ({"board": "unknown"}, "不支持的交易板块"),
         ({"side": "hold"}, "不支持的交易方向"),
         ({"on": date(2026, 7, 5)}, "规则尚未生效"),
     ],
@@ -220,6 +228,17 @@ def test_buy_quantity_requires_round_lot() -> None:
     rulebook.validate_quantity(rules, 100)
     with pytest.raises(PaperTradingError) as caught:
         rulebook.validate_quantity(rules, 150)
+
+    assert caught.value.code == "invalid_lot_size"
+
+
+def test_bse_accepts_101_shares_but_rejects_below_100() -> None:
+    rulebook = RuleBook.from_builtin_fixture()
+    rules = _resolve(rulebook, board="bse", side="buy")
+
+    rulebook.validate_quantity(rules, 101)
+    with pytest.raises(PaperTradingError) as caught:
+        rulebook.validate_quantity(rules, 99)
 
     assert caught.value.code == "invalid_lot_size"
 

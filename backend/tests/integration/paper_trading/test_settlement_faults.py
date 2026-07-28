@@ -8,6 +8,12 @@ from decimal import Decimal
 from typing import cast
 
 import pytest
+from app.models.investor_suitability import (
+    EntitlementStatus,
+    Market,
+    MarketAccessRule,
+    MarketEntitlement,
+)
 from app.models.paper_account import PaperAccount, PaperCashLedger, PaperHoldingLot
 from app.models.paper_order import (
     OrderStatus,
@@ -61,6 +67,41 @@ def _service(
         evidence_provider=lambda **_: evidence,
         trade_service=trade_service,
     )
+
+
+def _enable_main(session: Session, account: PaperAccount) -> None:
+    rule = session.scalar(
+        select(MarketAccessRule).where(
+            MarketAccessRule.market == Market.MAIN,
+            MarketAccessRule.rule_version == "test-main-v1",
+        )
+    )
+    if rule is None:
+        rule = MarketAccessRule(
+            market=Market.MAIN,
+            effective_from=NOW.date(),
+            minimum_average_assets_20d=None,
+            minimum_experience_months=None,
+            required_disclosure_version="main-risk-v1",
+            rule_version="test-main-v1",
+        )
+        session.add(rule)
+        session.flush()
+    session.add(
+        MarketEntitlement(
+            account_id=account.id,
+            account_generation=account.generation,
+            market=Market.MAIN,
+            status=EntitlementStatus.ENABLED,
+            can_buy=True,
+            can_sell=True,
+            can_subscribe=False,
+            rule_version=rule.rule_version,
+            enabled_at=NOW,
+            restricted_at=None,
+        )
+    )
+    session.flush()
 
 
 def _assert_rolled_back(
@@ -188,6 +229,7 @@ def test_confirmation_failure_after_freeze_rolls_back_order_cash_and_reservation
     db_session.flush()
     user_id = user.id
     account = PaperAccountService(db_session).get_or_create(user_id=user_id)
+    _enable_main(db_session, account)
     service = _order_service(db_session, FixedQuoteProvider(_quote()))
     order = _prepare(service, user_id)
     db_session.flush()

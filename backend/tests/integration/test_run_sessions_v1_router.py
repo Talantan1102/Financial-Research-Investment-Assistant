@@ -353,6 +353,45 @@ async def test_detail_returns_bounded_durable_messages_in_stable_order(
 
 
 @pytest.mark.asyncio
+async def test_detail_exposes_the_typed_outcome_of_its_same_latest_run(
+    session_api_context: tuple[Tenant, dict[str, User], dict[str, RunSession], Run],
+    client_for: ClientFactory,
+    async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    tenant, users, sessions, run = session_api_context
+    outcome = {
+        "code": "action_required",
+        "action_type": "apply_market_permission",
+        "action_url": "/market-permissions/apply?market=star",
+        "action_label": "申请科创板权限",
+        "resume_hint": "完成后回来重新下单",
+        "intent_summary": "买入科创板股票",
+    }
+    async with async_session_factory() as session, session.begin():
+        stored = await session.get(Run, run.id, with_for_update=True)
+        assert stored is not None
+        stored.outcome_code = "action_required"
+        stored.outcome_payload = outcome
+
+    async with client_for(users["member"]) as client:
+        response = await client.get(f"{_sessions_url(tenant.id)}/{sessions['member'].id}")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["latest_run_id"] == str(run.id)
+    assert payload["latest_run_outcome"] == outcome
+
+    async with async_session_factory() as session, session.begin():
+        stored = await session.get(Run, run.id, with_for_update=True)
+        assert stored is not None
+        stored.outcome_payload = {"code": "action_required", "action_url": "//bad"}
+
+    async with client_for(users["member"]) as client:
+        invalid_response = await client.get(f"{_sessions_url(tenant.id)}/{sessions['member'].id}")
+    assert invalid_response.status_code == 200
+    assert invalid_response.json()["latest_run_outcome"] is None
+
+
+@pytest.mark.asyncio
 async def test_detail_never_mixes_old_messages_with_a_new_terminal_run_snapshot(
     session_api_context: tuple[Tenant, dict[str, User], dict[str, RunSession], Run],
     client_for: ClientFactory,

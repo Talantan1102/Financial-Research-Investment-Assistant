@@ -33,6 +33,15 @@ export type RunStatus =
   | 'failed'
   | 'cancelled'
 
+export interface ActionRequiredOutcome {
+  code: 'action_required'
+  action_type: string
+  action_url: string
+  action_label: string
+  resume_hint: string
+  intent_summary: string
+}
+
 export interface RunResponse {
   id: string
   tenant_id: string
@@ -47,6 +56,7 @@ export interface RunResponse {
   finished_at: string | null
   error_code: string | null
   error_message: string | null
+  outcome: ActionRequiredOutcome | null
 }
 
 export interface CreateRunBody {
@@ -93,6 +103,7 @@ export interface RunSessionDetail extends RunSessionSummary {
   revisions_next_cursor?: string | null
   latest_run_id: string | null
   latest_run_status: RunStatus | null
+  latest_run_outcome: ActionRequiredOutcome | null
 }
 
 export interface RunRevision {

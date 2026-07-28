@@ -10,6 +10,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.chatloop.outcomes import ActionRequiredOutcome
 from app.run_control.types import RunStatus
 
 _REDIS_STREAM_ID = re.compile(r"^(?:0|[1-9][0-9]*)-(?:0|[1-9][0-9]*)$")
@@ -73,8 +74,28 @@ class RunResponse(BaseModel):
     finished_at: datetime | None
     error_code: str | None
     error_message: str | None
+    outcome: ActionRequiredOutcome | None = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+def parse_action_required_outcome(
+    payload: object,
+    *,
+    outcome_code: object | None = None,
+) -> ActionRequiredOutcome | None:
+    """Return a client-safe outcome, hiding malformed durable payloads.
+
+    A row/event can outlive a previous application version, so a bad JSONB
+    payload must not turn a read or SSE replay into a server error.
+    """
+    try:
+        outcome = ActionRequiredOutcome.model_validate(payload)
+    except (TypeError, ValueError):
+        return None
+    if outcome_code is not None and outcome.code != outcome_code:
+        return None
+    return outcome
 
 
 class TraceItem(BaseModel):

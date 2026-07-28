@@ -7,7 +7,7 @@ import uuid
 from collections.abc import Callable
 from datetime import date, datetime, time
 from decimal import ROUND_HALF_UP, Decimal, DecimalException
-from typing import cast
+from typing import Protocol, cast
 from zoneinfo import ZoneInfo
 
 from pydantic import ValidationError
@@ -15,6 +15,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.models.investor_suitability import EntitlementStatus, Market, MarketEntitlement
 from app.models.paper_account import PaperAccount, PaperAccountStatus, PaperHoldingLot
 from app.models.paper_order import (
     OrderSide,
@@ -27,6 +28,7 @@ from app.models.paper_order import (
     PaperOrder,
 )
 from app.schemas.paper_trading import OrderDraft, OrderDraftPreview, OrderPreview
+from app.services.investor_suitability.instruments import classify_market
 from app.services.paper_trading.account_service import PaperAccountService
 from app.services.paper_trading.clock import TradingClock
 from app.services.paper_trading.errors import PaperTradingError
@@ -36,10 +38,51 @@ from app.services.paper_trading.rulebook import RuleBook
 from app.services.paper_trading.types import MarketPhase, QuoteLevel, RealtimeQuote, RuleSet
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
-_TS_CODE = re.compile(r"\d{6}\.(?:SH|SZ)")
+_TS_CODE = re.compile(r"\d{6}\.(?:SH|SZ|BJ)")
 _CENT = Decimal("0.01")
 _PROPOSAL_UNIQUE_CONSTRAINT = "uq_paper_orders_account_generation_proposal"
 _MAX_CONFIRMATION_ID_LENGTH = 128
+
+
+class EntitlementReader(Protocol):
+    """Reads one account generation's market permission inside the current transaction."""
+
+    def is_permitted(
+        self,
+        *,
+        account: PaperAccount,
+        market: Market,
+        side: OrderSide,
+        for_update: bool,
+    ) -> bool: ...
+
+
+class DatabaseEntitlementReader:
+    """Fail-closed database-backed permission reader for paper orders."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def is_permitted(
+        self,
+        *,
+        account: PaperAccount,
+        market: Market,
+        side: OrderSide,
+        for_update: bool,
+    ) -> bool:
+        statement = select(MarketEntitlement).where(
+            MarketEntitlement.account_id == account.id,
+            MarketEntitlement.account_generation == account.generation,
+            MarketEntitlement.market == market,
+            MarketEntitlement.status == EntitlementStatus.ENABLED,
+        )
+        if for_update:
+            statement = statement.with_for_update().execution_options(populate_existing=True)
+        entitlement = self._session.scalar(statement)
+        if entitlement is None:
+            return False
+        return bool(entitlement.can_buy if side is OrderSide.BUY else entitlement.can_sell)
 
 
 class PaperOrderService:
@@ -51,6 +94,7 @@ class PaperOrderService:
         clock: TradingClock,
         rulebook: RuleBook,
         fee_schedule: FeeSchedule | None = None,
+        entitlement_reader: EntitlementReader | None = None,
         now: Callable[[], datetime],
     ) -> None:
         self._session = session
@@ -58,6 +102,7 @@ class PaperOrderService:
         self.clock = clock
         self.rulebook = rulebook
         self.fee_schedule = fee_schedule or FeeSchedule.from_builtin_fixture()
+        self.entitlement_reader = entitlement_reader or DatabaseEntitlementReader(session)
         self.account_service = PaperAccountService(session)
         self._now = now
 
@@ -72,7 +117,8 @@ class PaperOrderService:
         if not isinstance(draft, OrderDraft):
             raise PaperTradingError("invalid_order", "draft must be an OrderDraft")
         normalized_draft = _canonical_draft(draft)
-        account = self.account_service.get_active(user_id=user_id)
+        account = self.account_service.get_active(user_id=user_id, for_update=True)
+        self._require_market_permission(account=account, draft=normalized_draft, for_update=True)
         quote = self._quote(normalized_draft.ts_code)
         now = self._current_time()
         preview = self._calculate_preview(
@@ -135,6 +181,7 @@ class PaperOrderService:
 
         account = self.account_service.get_active(user_id=user_id, for_update=True)
         self._session.refresh(account, with_for_update=True)
+        self._require_market_permission(account=account, draft=confirmed, for_update=True)
         now = self._current_time()
         order_id = uuid.uuid4()
         preview = self._calculate_preview(
@@ -368,10 +415,11 @@ class PaperOrderService:
         if not isinstance(draft, OrderDraft):
             raise PaperTradingError("invalid_order", "draft must be an OrderDraft")
         order = self._owned_order(user_id=user_id, order_id=order_id)
-        account = self.account_service.get_active(user_id=user_id)
+        account = self.account_service.get_active(user_id=user_id, for_update=True)
         if order.account_id != account.id or order.account_generation != account.generation:
             raise PaperTradingError("stale_account_generation", "账户已重置，请重新下单")
         normalized_draft = _canonical_draft(draft)
+        self._require_market_permission(account=account, draft=normalized_draft, for_update=True)
         quote = self._quote(normalized_draft.ts_code)
         now = self._current_time()
         return self._calculate_preview(
@@ -427,6 +475,7 @@ class PaperOrderService:
         self._session.refresh(account, with_for_update=True)
         if order.account_id != account.id or order.account_generation != account.generation:
             raise PaperTradingError("stale_account_generation", "account generation has changed")
+        self._require_market_permission(account=account, draft=normalized_draft, for_update=True)
 
         now = self._current_time()
         if preflight_expired and now < order.expires_at:
@@ -1022,6 +1071,33 @@ class PaperOrderService:
                 break
         return draft.quantity
 
+    def _require_market_permission(
+        self,
+        *,
+        account: PaperAccount,
+        draft: OrderDraft,
+        for_update: bool,
+    ) -> None:
+        """Fail closed before a paper order can be proposed or activated."""
+        try:
+            market = classify_market(draft.ts_code)
+            permitted = self.entitlement_reader.is_permitted(
+                account=account,
+                market=market,
+                side=draft.side,
+                for_update=for_update,
+            )
+        except Exception as exc:
+            raise PaperTradingError(
+                "market_permission_required",
+                "market permission is required before this order",
+            ) from exc
+        if not permitted:
+            raise PaperTradingError(
+                "market_permission_required",
+                "market permission is required before this order",
+            )
+
     def _by_client_request_id(
         self, *, user_id: uuid.UUID, client_request_id: str
     ) -> PaperOrder | None:
@@ -1358,16 +1434,12 @@ def _require_text(value: object, *, field: str, maximum: int) -> str:
 
 
 def _board(ts_code: str) -> str:
-    code, exchange = ts_code.split(".", maxsplit=1)
-    if exchange == "SH" and code.startswith(("688", "689")):
-        return "star"
-    if exchange == "SZ" and code.startswith(("300", "301")):
-        return "chinext"
-    if (exchange == "SH" and code.startswith(("600", "601", "603", "605"))) or (
-        exchange == "SZ" and code.startswith(("000", "001", "002", "003"))
-    ):
-        return "main"
-    raise PaperTradingError("unsupported_trading_regime", "首版不支持该证券板块")
+    return {
+        Market.MAIN: "main",
+        Market.CHINEXT: "chinext",
+        Market.STAR: "star",
+        Market.BSE: "bse",
+    }[classify_market(ts_code)]
 
 
 def _risk_warning(name: str) -> bool:

@@ -58,7 +58,8 @@ class RuleSet(BaseModel):
     board: str
     risk_warning: bool
     side: Literal["buy", "sell"]
-    buy_lot_size: int = Field(gt=0)
+    minimum_order_quantity: int = Field(gt=0)
+    quantity_increment: int = Field(gt=0)
     price_tick: Decimal = Field(gt=0)
     price_limit_ratio: Decimal = Field(gt=0)
     quote_freshness_seconds: int = Field(gt=0)

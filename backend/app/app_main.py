@@ -26,6 +26,9 @@ from app.router import escalate as escalate_router  # noqa: E402
 from app.router import research  # noqa: E402
 from app.router.attachment_router import router as attachment_router  # noqa: E402
 from app.router.auth_router import router as auth_router  # noqa: E402
+from app.router.investor_suitability_router import (
+    router as investor_suitability_router,  # noqa: E402
+)
 from app.router.knowledge_router import router as knowledge_router  # noqa: E402
 from app.router.memory_router import router as memory_router  # noqa: E402  (C.5)
 from app.router.monitoring_router import router as monitoring_router  # noqa: E402
@@ -388,6 +391,7 @@ app.include_router(monitoring_router)
 app.include_router(reports_router)  # v0.9.x — research reports CRUD
 app.include_router(portfolio_router)  # v1.0 — portfolio data model + onboarding
 app.include_router(paper_trading_router)
+app.include_router(investor_suitability_router)
 app.include_router(watchlist_router)
 app.include_router(tenants_router)
 app.include_router(runs_router)

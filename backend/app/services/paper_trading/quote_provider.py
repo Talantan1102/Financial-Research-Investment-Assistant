@@ -16,7 +16,7 @@ SHANGHAI = ZoneInfo("Asia/Shanghai")
 MAX_FUTURE_SKEW = timedelta(seconds=2)
 _SOURCE = "tushare.realtime_quote"
 _FETCH_FAILURES = (OSError, RuntimeError)
-_TS_CODE_PATTERN = re.compile(r"\d{6}\.(?:SH|SZ)")
+_TS_CODE_PATTERN = re.compile(r"\d{6}\.(?:SH|SZ|BJ)")
 _MIN_SUPPORTED_PRICE = Decimal("0.0001")
 _MAX_SUPPORTED_PRICE = Decimal("99999999999999.9999")
 _MAX_SUPPORTED_QUANTITY = Decimal(2_147_483_647)

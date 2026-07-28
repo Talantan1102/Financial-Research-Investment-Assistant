@@ -19,6 +19,8 @@ _MAX_SUPPORTED_PRICE = Decimal("99999999999999.9999")
 class _BoardLimits:
     normal: Decimal
     risk_warning: Decimal
+    minimum_order_quantity: int | None = None
+    quantity_increment: int | None = None
 
 
 class RuleBook:
@@ -27,7 +29,8 @@ class RuleBook:
             self._version = _require_string(fixture, "version")
             self._effective_from = date.fromisoformat(_require_string(fixture, "effective_from"))
             defaults = _require_mapping(fixture, "defaults")
-            self._buy_lot_size = _require_positive_int(defaults, "buy_lot_size")
+            self._minimum_order_quantity = _require_positive_int(defaults, "minimum_order_quantity")
+            self._quantity_increment = _require_positive_int(defaults, "quantity_increment")
             self._price_tick = _require_supported_price(defaults, "price_tick")
             self._quote_freshness_seconds = _require_positive_int(
                 defaults, "quote_freshness_seconds"
@@ -50,6 +53,16 @@ class RuleBook:
                         raw_limits,
                         "risk_warning_limit_ratio",
                         field=f"{board}.risk_warning_limit_ratio",
+                    ),
+                    minimum_order_quantity=_optional_positive_int(
+                        raw_limits,
+                        "minimum_order_quantity",
+                        field=f"{board}.minimum_order_quantity",
+                    ),
+                    quantity_increment=_optional_positive_int(
+                        raw_limits,
+                        "quantity_increment",
+                        field=f"{board}.quantity_increment",
                     ),
                 )
             self._boards: Mapping[str, _BoardLimits] = MappingProxyType(normalized_boards)
@@ -102,7 +115,10 @@ class RuleBook:
             board=board,
             risk_warning=risk_warning,
             side=resolved_side,
-            buy_lot_size=self._buy_lot_size,
+            minimum_order_quantity=(
+                board_rules.minimum_order_quantity or self._minimum_order_quantity
+            ),
+            quantity_increment=board_rules.quantity_increment or self._quantity_increment,
             price_tick=self._price_tick,
             price_limit_ratio=price_limit_ratio,
             quote_freshness_seconds=self._quote_freshness_seconds,
@@ -112,19 +128,20 @@ class RuleBook:
         if quantity <= 0:
             raise PaperTradingError("invalid_lot_size", "委托数量必须大于零")
 
-        lot_size = rules.buy_lot_size
+        minimum = rules.minimum_order_quantity
+        increment = rules.quantity_increment
         if rules.side == "buy":
-            if quantity % lot_size:
+            if quantity < minimum or quantity % increment:
                 raise PaperTradingError("invalid_lot_size", "买入数量必须为整手")
             return
 
         if rules.side == "sell":
             if quantity > current_holding:
                 raise PaperTradingError("insufficient_sellable_quantity", "卖出数量超过当前持仓")
-            if quantity % lot_size == 0:
+            if quantity % increment == 0:
                 return
 
-            remainder = current_holding % lot_size
+            remainder = current_holding % increment
             if remainder > 0 and quantity in {current_holding, remainder}:
                 return
             raise PaperTradingError("invalid_lot_size", "零股卖出必须一次申报全部零股")
@@ -188,6 +205,15 @@ def _require_positive_int(value: dict[str, Any], key: str) -> int:
     if item <= 0:
         raise ValueError(f"{key} must be positive")
     return item
+
+
+def _optional_positive_int(value: dict[str, Any], key: str, *, field: str) -> int | None:
+    if key not in value:
+        return None
+    try:
+        return _require_positive_int(value, key)
+    except (TypeError, ValueError) as exc:
+        raise type(exc)(f"{field}: {exc}") from exc
 
 
 def _require_positive_decimal(
