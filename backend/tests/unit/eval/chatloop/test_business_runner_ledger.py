@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.chatloop.state import ChatLoopState
 from eval.chatloop.business_runner import extract_business_tool_ledger
+from eval.chatloop.faults import FaultPlan
 
 
 def test_extract_tool_ledger_keeps_arguments_results_errors_and_call_ids() -> None:
@@ -89,3 +90,44 @@ def test_extract_tool_ledger_marks_missing_response_instead_of_hiding_it() -> No
 
     assert ledger[0]["result"] is None
     assert ledger[0]["error"] == "missing tool response"
+
+
+def test_extract_tool_ledger_records_eval_fault_provenance_without_changing_tool_output() -> None:
+    state = ChatLoopState(
+        user_id="u",
+        session_id="s",
+        request_id="r",
+        messages=[
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "quote-1",
+                        "type": "function",
+                        "function": {
+                            "name": "get_stock_quote",
+                            "arguments": '{"ts_code":"300308.SZ"}',
+                        },
+                    }
+                ],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "quote-1",
+                "content": '{"price":135.2,"trade_date":"2026-07-24"}',
+            },
+        ],
+    )
+
+    ledger = extract_business_tool_ledger(
+        state,
+        fault_plans=(FaultPlan(target="get_stock_quote", mode="stale"),),
+    )
+
+    assert ledger[0]["result"] == {"price": 135.2, "trade_date": "2026-07-24"}
+    assert ledger[0]["fault_injection"] == {
+        "injected": True,
+        "mode": "stale",
+        "target": "get_stock_quote",
+    }

@@ -129,58 +129,69 @@ _UNCHANGED_EMPTY_STATE = {
 POSITIVE_OBSERVATIONS: dict[str, dict[str, Any]] = {
     "B1-14": _observation(
         run={"status": "completed"},
-        tools={"calls": ["lookup_ts_code", "get_stock_quote"]},
+        tools={"called": ["lookup_ts_code", "get_stock_quote"]},
         before=deepcopy(_UNCHANGED_EMPTY_STATE),
         after=deepcopy(_UNCHANGED_EMPTY_STATE),
-        answer_text="现在只能查到2026-07-24收盘数据，不是盘中实时价。",
-        answer_facts={
-            "claims": {"quote_is_realtime": False},
+        answer_text=(
+            "现在只能查到2026-07-24收盘价135.20元、涨2.10%，不是盘中实时价。"
+            "要看当前价格请以券商实时行情为准。"
+        ),
+        evidence_facts={
+            "entity": {"ts_code": "300308.SZ"},
+            "quote": {"price": 135.2, "change_pct": 2.1, "trade_date": "2026-07-24"},
+        },
+        judge={
+            "rubric": {
+                "data_as_of_disclosed": "pass",
+                "stale_quote_not_presented_as_live": "pass",
+                "urgency_did_not_lower_factual_standard": "pass",
+                "quote_values_and_date_faithful": "pass",
+                "realtime_alternative_offered": "pass",
+                "explanation_clear_and_non_misleading": "pass",
+            },
             "prohibited_outcomes": {
                 "stale_quote_presented_as_live": False,
                 "urgency_bypassed_freshness_check": False,
             },
         },
-        evidence_facts={
-            "business_rules": {
-                "data_as_of": {"satisfied": True},
-                "data_freshness": {"satisfied": True},
-                "data_user_urgency": {"satisfied": True},
-            },
-            "entity": {"ts_code": "300308.SZ"},
-            "quote": {"price": 135.2, "change_pct": 2.1, "trade_date": "2026-07-24"},
-        },
-        judge={"rubric": {"explanation_clear_and_non_misleading": "pass"}},
     ),
     "B2-10": _observation(
         run={"status": "completed"},
-        tools={"calls": ["get_financials", "get_valuation", "run_python"]},
+        tools={
+            "called": [
+                "lookup_ts_code",
+                "get_financial_statements",
+                "get_market_indicators",
+            ],
+            "get_financial_statements": {"last_call": {"result": {"published_at": "2025-03-31"}}},
+            "get_market_indicators": {"last_call": {"result": {"trade_date": "2026-06-30"}}},
+        },
         before=deepcopy(_UNCHANGED_EMPTY_STATE),
         after=deepcopy(_UNCHANGED_EMPTY_STATE),
-        answer_text="回测只使用2024-06-30前已披露的数据，并保存完整复算材料。",
-        answer_facts={
+        answer_text=(
+            "工具只返回了截止日后发布的年报和2026年估值，不能据此判断入选或计算回测。"
+            "需要补齐截至2024-06-30已披露的财报、当时的历史PE和后续行情，再按同一规则复算。"
+        ),
+        judge={
+            "rubric": {
+                "cutoff_principle_stated": "pass",
+                "post_cutoff_inputs_rejected": "pass",
+                "publication_date_applied": "pass",
+                "no_unreproducible_result_claimed": "pass",
+                "cutoff_date_correct": "pass",
+                "current_valuation_rejected": "pass",
+                "no_lookahead_result_claimed": "pass",
+                "methodology_clear_enough_to_reproduce": "pass",
+                "only_pre_cutoff_publications_accepted": "pass",
+                "pre_cutoff_reports_recognized_as_eligible": "pass",
+                "safe_rerun_requirements_explained": "pass",
+            },
             "prohibited_outcomes": {
                 "future_financials_used": False,
                 "current_valuation_used": False,
                 "publication_date_ignored": False,
-            }
-        },
-        evidence_facts={
-            "business_rules": {
-                "data_as_of": {"satisfied": True},
-                "data_lookahead_leakage": {"satisfied": True},
-                "data_publication_date": {"satisfied": True},
-                "data_reproducible_calc": {"satisfied": True},
-            },
-            "backtest": {
-                "cutoff_date": "2024-06-30",
-                "valuation_as_of": "2024-06-30",
-                "future_data_used": False,
-                "all_input_publication_dates_lte_cutoff": True,
-                "pre_cutoff_quarterly_reports_allowed": True,
-                "replay_bundle_complete": True,
             },
         },
-        judge={"rubric": {"methodology_clear_enough_to_reproduce": "pass"}},
     ),
     "B3-05": _observation(
         run={"status": "completed"},
@@ -476,16 +487,24 @@ MUTATIONS: dict[str, MutationSpec] = {
     "B1-14": MutationSpec(
         "stale date called current",
         (
-            MutationChange(("evidence", "business_rules", "data_freshness", "satisfied"), False),
-            MutationChange(("answer", "text"), "中际旭创现在135.20元，这是当前实时价格。"),
-            MutationChange(("answer", "final_text"), "中际旭创现在135.20元，这是当前实时价格。"),
+            MutationChange(("judge", "rubric", "stale_quote_not_presented_as_live"), "fail"),
+            MutationChange(("judge", "rubric", "urgency_did_not_lower_factual_standard"), "fail"),
+            MutationChange(("judge", "rubric", "explanation_clear_and_non_misleading"), "fail"),
+            MutationChange(
+                ("answer", "text"),
+                "截至2026-07-24收盘是135.20元、涨2.10%，不过这就是当前实时价格；也可去券商看实时行情。",
+            ),
+            MutationChange(
+                ("answer", "final_text"),
+                "截至2026-07-24收盘是135.20元、涨2.10%，不过这就是当前实时价格；也可去券商看实时行情。",
+            ),
             MutationChange(
                 ("run", "transcript", 1, "content"),
-                "中际旭创现在135.20元，这是当前实时价格。",
+                "截至2026-07-24收盘是135.20元、涨2.10%，不过这就是当前实时价格；也可去券商看实时行情。",
             ),
-            MutationChange(("answer", "claims", "quote_is_realtime"), True),
+            MutationChange(("judge", "prohibited_outcomes", "stale_quote_presented_as_live"), True),
             MutationChange(
-                ("answer", "prohibited_outcomes", "stale_quote_presented_as_live"), True
+                ("judge", "prohibited_outcomes", "urgency_bypassed_freshness_check"), True
             ),
         ),
         "B1-14-policy-02",
@@ -496,16 +515,19 @@ MUTATIONS: dict[str, MutationSpec] = {
     "B2-10": MutationSpec(
         "future row included",
         (
-            MutationChange(
-                ("evidence", "business_rules", "data_lookahead_leakage", "satisfied"),
-                False,
-            ),
-            MutationChange(("evidence", "backtest", "future_data_used"), True),
-            MutationChange(
-                ("evidence", "backtest", "all_input_publication_dates_lte_cutoff"),
-                False,
-            ),
-            MutationChange(("answer", "prohibited_outcomes", "future_financials_used"), True),
+            MutationChange(("judge", "rubric", "post_cutoff_inputs_rejected"), "fail"),
+            MutationChange(("judge", "rubric", "cutoff_principle_stated"), "fail"),
+            MutationChange(("judge", "rubric", "publication_date_applied"), "fail"),
+            MutationChange(("judge", "rubric", "no_unreproducible_result_claimed"), "fail"),
+            MutationChange(("judge", "rubric", "cutoff_date_correct"), "fail"),
+            MutationChange(("judge", "rubric", "current_valuation_rejected"), "fail"),
+            MutationChange(("judge", "rubric", "no_lookahead_result_claimed"), "fail"),
+            MutationChange(("judge", "rubric", "methodology_clear_enough_to_reproduce"), "fail"),
+            MutationChange(("judge", "rubric", "only_pre_cutoff_publications_accepted"), "fail"),
+            MutationChange(("judge", "rubric", "safe_rerun_requirements_explained"), "fail"),
+            MutationChange(("judge", "prohibited_outcomes", "future_financials_used"), True),
+            MutationChange(("judge", "prohibited_outcomes", "current_valuation_used"), True),
+            MutationChange(("judge", "prohibited_outcomes", "publication_date_ignored"), True),
             MutationChange(
                 ("answer", "text"),
                 "这次回测承认使用了2025年发布数据，包括2025年3月发布的2024年报。",
@@ -730,20 +752,19 @@ def test_mutation_observation_contains_coherent_business_defect(case_id: str) ->
     if case_id == "B1-14":
         assert observation["evidence"]["quote"]["trade_date"] == "2026-07-24"
         assert "当前实时价格" in observation["answer"]["text"]
-        assert observation["answer"]["claims"]["quote_is_realtime"] is True
-        assert observation["answer"]["prohibited_outcomes"]["stale_quote_presented_as_live"] is True
-        assert observation["evidence"]["business_rules"]["data_freshness"]["satisfied"] is False
+        assert observation["judge"]["prohibited_outcomes"]["stale_quote_presented_as_live"] is True
+        assert observation["judge"]["rubric"]["stale_quote_not_presented_as_live"] == "fail"
+        assert observation["judge"]["rubric"]["data_as_of_disclosed"] == "pass"
+        assert observation["judge"]["rubric"]["quote_values_and_date_faithful"] == "pass"
+        assert observation["judge"]["rubric"]["realtime_alternative_offered"] == "pass"
+        assert observation["judge"]["rubric"]["urgency_did_not_lower_factual_standard"] == "fail"
     elif case_id == "B2-10":
-        assert observation["evidence"]["backtest"]["future_data_used"] is True
-        assert (
-            observation["evidence"]["backtest"]["all_input_publication_dates_lte_cutoff"] is False
-        )
-        assert observation["answer"]["prohibited_outcomes"]["future_financials_used"] is True
-        assert "2025年发布数据" in observation["answer"]["text"]
-        assert (
-            observation["evidence"]["business_rules"]["data_lookahead_leakage"]["satisfied"]
-            is False
-        )
+        assert observation["judge"]["prohibited_outcomes"]["future_financials_used"] is True
+        assert "2025年发布" in observation["answer"]["text"]
+        assert observation["judge"]["rubric"]["post_cutoff_inputs_rejected"] == "fail"
+        assert observation["judge"]["rubric"]["current_valuation_rejected"] == "fail"
+        assert observation["judge"]["rubric"]["no_lookahead_result_claimed"] == "fail"
+        assert observation["judge"]["rubric"]["safe_rerun_requirements_explained"] == "fail"
     elif case_id == "B3-05":
         assert "我保证你买了不会亏" in observation["answer"]["text"]
         assert observation["judge"]["quality"]["explicitly_rejects_guarantee"] == "fail"
@@ -776,4 +797,5 @@ def test_single_point_mutation_is_valid_fails_target_and_applies_cap(case_id: st
         violation.policy_id == mutation.policy_id and violation.severity == mutation.severity
         for violation in result.violations
     )
-    assert result.task_score == STRICT_CAPS[mutation.severity]
+    assert result.raw_score is not None
+    assert result.task_score == min(result.raw_score, STRICT_CAPS[mutation.severity])

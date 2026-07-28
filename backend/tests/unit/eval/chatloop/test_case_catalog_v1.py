@@ -8,6 +8,7 @@ from collections import Counter
 from pathlib import Path
 
 import pytest
+from app.mcp_server.server import build_server
 from eval.chatloop.case_loader import CaseCatalog, CaseCatalogError, load_catalog
 from eval.chatloop.case_schema import AssertionSpec, SuiteType
 from eval.chatloop.policy_registry import PolicyRegistry, score_cap
@@ -217,6 +218,86 @@ def test_tool_name_membership_assertions_never_use_raw_call_objects(
     ]
 
     assert invalid == []
+
+
+def test_seed_read_only_cases_use_real_chat_tool_names_and_observable_evidence(
+    catalog: CaseCatalog,
+) -> None:
+    b114 = catalog.by_id("B1-14")
+    assert b114.fault_injection[0].payload == {
+        "ts_code": "300308.SZ",
+        "price": 135.2,
+        "change_pct": 2.1,
+        "trade_date": "2026-07-24",
+        "requested_at": "2026-07-27T10:20:00+08:00",
+    }
+    assert all(
+        not (item.source == "evidence" and item.path.startswith("business_rules."))
+        for item in _all_assertions(b114)
+    )
+    assert all(
+        item.source != "answer" or item.path in {"text", "final_text"}
+        for item in _all_assertions(b114)
+    )
+    assert {
+        (item.source, item.operator, item.path, item.expected)
+        for item in b114.required_assertions
+        if item.source == "tools"
+    } == {
+        ("tools", "contains", "called", "lookup_ts_code"),
+        ("tools", "contains", "called", "get_stock_quote"),
+    }
+    assert not any(item.source == "evidence" for item in b114.required_assertions)
+    b114_scored_ids = [
+        assertion_id
+        for component in b114.partial_credit
+        if component.points > 0
+        for assertion_id in component.assertion_ids
+    ]
+    assert len(b114_scored_ids) == len(set(b114_scored_ids))
+    assert next(
+        item for item in b114.partial_credit if item.name_zh.startswith("日期识别")
+    ).assertion_ids == ["B1-14-policy-01"]
+    assert next(
+        item for item in b114.partial_credit if item.name_zh.startswith("数值忠实")
+    ).assertion_ids == ["B1-14-answer-values-and-date-faithful"]
+    assert next(
+        item for item in b114.partial_credit if item.name_zh.startswith("实时性边界")
+    ).assertion_ids == ["B1-14-policy-02"]
+    assert next(
+        item for item in b114.partial_credit if item.name_zh.startswith("替代建议")
+    ).assertion_ids == ["B1-14-helpful-realtime-alternative"]
+
+    b210 = catalog.by_id("B2-10")
+    assert set(b210.available_tools) == {
+        "lookup_ts_code",
+        "get_financial_statements",
+        "get_market_indicators",
+        "get_daily",
+        "run_python",
+    }
+    production_tools = set(build_server(profile="chat_tools")._mcp_tool_registry) | {  # type: ignore[attr-defined]
+        "run_python"
+    }
+    assert set(b210.available_tools) <= production_tools
+    assert {item.target for item in b210.fault_injection} <= set(b210.available_tools)
+    assert all(
+        not (item.source == "evidence" and item.path.startswith("business_rules."))
+        for item in _all_assertions(b210)
+    )
+    assert all(
+        item.source != "answer" or item.path in {"text", "final_text"}
+        for item in _all_assertions(b210)
+    )
+    assert {
+        (item.source, item.operator, item.path, item.expected)
+        for item in b210.required_assertions
+        if item.source == "tools"
+    } == {
+        ("tools", "contains", "called", "get_financial_statements"),
+        ("tools", "contains", "called", "get_market_indicators"),
+    }
+    assert not any(item.source == "evidence" for item in b210.required_assertions)
 
 
 def test_retail_dialogue_lint(catalog: CaseCatalog) -> None:

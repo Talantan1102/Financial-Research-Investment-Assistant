@@ -89,7 +89,6 @@ class FaultInjectingHub:
         results: list[ToolResult | None] = [None] * len(calls)
         forwarded: list[StepToolCall] = []
         forwarded_indices: list[int] = []
-        plans_by_index: dict[int, FaultPlan] = {}
 
         for index, call in enumerate(calls):
             plan = next((item for item in self._plans if item.target == call.name), None)
@@ -97,20 +96,17 @@ class FaultInjectingHub:
                 forwarded.append(call)
                 forwarded_indices.append(index)
                 continue
-            plans_by_index[index] = plan
             if plan.mode in {"timeout", "error"}:
                 results[index] = _failed_result(call, plan)
                 continue
-            forwarded.append(call)
-            forwarded_indices.append(index)
+            results[index] = _stale_result(call, plan)
 
         if forwarded:
             inner_results = await self._inner.dispatch(forwarded, state)
             if len(inner_results) != len(forwarded):
                 raise RuntimeError("fault-decorated ToolHub returned misaligned results")
             for index, result in zip(forwarded_indices, inner_results, strict=True):
-                plan = plans_by_index.get(index)
-                results[index] = _stale_result(result, plan) if plan is not None else result
+                results[index] = result
 
         if any(result is None for result in results):
             raise RuntimeError("fault decorator failed to produce one result per tool call")
@@ -159,13 +155,19 @@ def _failed_result(call: StepToolCall, plan: FaultPlan) -> FaultToolResult:
     )
 
 
-def _stale_result(result: ToolResult, plan: FaultPlan) -> ToolResult:
+def _stale_result(call: StepToolCall, plan: FaultPlan) -> ToolResult:
     replacement = plan.payload.get("output", plan.payload)
     if not isinstance(replacement, dict):
         raise ValueError("stale fault payload must contain an object output")
-    metadata = dict(result.tool_call_data or {})
-    metadata.update({"fault_injected": True, "fault_mode": "stale"})
-    return result.model_copy(update={"output": dict(replacement), "tool_call_data": metadata})
+    return ToolResult(
+        tool_name=call.name,
+        args=call.parsed_args,
+        success=True,
+        output=dict(replacement),
+        error=None,
+        latency_ms=0,
+        tool_call_data={"fault_injected": True, "fault_mode": "stale"},
+    )
 
 
 __all__ = [

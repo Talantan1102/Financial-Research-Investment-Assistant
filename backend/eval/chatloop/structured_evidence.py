@@ -7,6 +7,7 @@ import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
+from datetime import datetime
 from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, StrictBool, model_validator
@@ -29,6 +30,16 @@ _BUSINESS_WRITE_TOOLS = frozenset(
     }
 )
 _ORDER_WRITE_TOOLS = frozenset({"place_paper_order", "cancel_paper_order", "reset_paper_account"})
+_QUOTE_EVIDENCE_FIELDS = (
+    "ts_code",
+    "price",
+    "change_pct",
+    "volume",
+    "trade_date",
+    "requested_at",
+    "data_mode",
+    "source",
+)
 SEMANTIC_JUDGE_RUBRIC_VERSION = "business-semantic-v1"
 _SEMANTIC_JUDGE_INSTRUCTIONS = (
     "你是金融对话评估裁判。只判断 judge 来源的主观质量断言，不能生成业务事实。"
@@ -229,13 +240,24 @@ class BusinessStructuredEvidenceProvider:
         if answer_text is None:
             raise InvalidEvidenceError("transcript has no assistant answer")
 
+        domain_evidence = _project_market_evidence(raw.tool_ledger)
+        projects_stock_quote = "get_stock_quote" in case.available_tools or any(
+            row.get("tool_name") == "get_stock_quote" for row in raw.tool_ledger
+        )
+        evidence = (
+            _without_unproven_market_facts(raw.evidence)
+            if projects_stock_quote
+            else deepcopy(raw.evidence)
+        )
+        _merge_mapping(evidence, domain_evidence)
+
         projected: dict[str, Any] = {
             "run": {**deepcopy(raw.run_state), "transcript": deepcopy(list(raw.transcript))},
             "tools": _project_tools(raw.tool_ledger),
             "database": deepcopy(result.database_before_after),
             "answer": {"text": answer_text, "final_text": answer_text},
             "evidence": {
-                **deepcopy(raw.evidence),
+                **evidence,
                 "versions": dict(self._versions),
                 "cost_latency": {
                     "cost_cny": raw.cost_cny,
@@ -306,6 +328,132 @@ def _last_assistant_text(transcript: Sequence[Mapping[str, Any]]) -> str | None:
     return None
 
 
+def _project_market_evidence(ledger: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    evidence: dict[str, Any] = {}
+    provenance: dict[str, dict[str, Any]] = {}
+    resolved_ts_code: Any = None
+
+    lookup = _last_successful_call(ledger, "lookup_ts_code")
+    if lookup is not None:
+        call_index, row, result = lookup
+        ts_code = result.get("ts_code")
+        if ts_code is not None:
+            resolved_ts_code = ts_code
+            evidence["entity"] = {"ts_code": deepcopy(ts_code)}
+            provenance["entity.ts_code"] = _field_provenance(
+                tool_name="lookup_ts_code",
+                call_index=call_index,
+                result_field="ts_code",
+                fault_injection=row.get("fault_injection"),
+            )
+
+    quote = _last_successful_call(ledger, "get_stock_quote")
+    if quote is not None:
+        call_index, row, result = quote
+        quote_ts_code = result.get("ts_code")
+        if (
+            resolved_ts_code is not None
+            and quote_ts_code is not None
+            and quote_ts_code != resolved_ts_code
+        ):
+            raise InvalidEvidenceError(
+                "conflicting ts_code between lookup_ts_code and get_stock_quote"
+            )
+        quote_values: dict[str, Any] = {}
+        for field in _QUOTE_EVIDENCE_FIELDS:
+            value = result.get(field)
+            if value is None:
+                continue
+            normalized = _normalize_compact_date(value) if field == "trade_date" else value
+            quote_values[field] = deepcopy(normalized)
+            field_provenance = _field_provenance(
+                tool_name="get_stock_quote",
+                call_index=call_index,
+                result_field=field,
+                fault_injection=row.get("fault_injection"),
+            )
+            if normalized != value:
+                field_provenance["normalization"] = "YYYYMMDD->YYYY-MM-DD"
+            provenance[f"quote.{field}"] = field_provenance
+        if quote_values:
+            evidence["quote"] = quote_values
+
+    if provenance:
+        evidence["provenance"] = provenance
+    return evidence
+
+
+def _without_unproven_market_facts(raw: Mapping[str, Any]) -> dict[str, Any]:
+    """Drop market facts that did not originate in the captured tool ledger."""
+    evidence = deepcopy(dict(raw))
+    evidence.pop("quote", None)
+
+    entity = evidence.get("entity")
+    if isinstance(entity, dict):
+        entity.pop("ts_code", None)
+        if not entity:
+            evidence.pop("entity", None)
+
+    provenance = evidence.get("provenance")
+    if isinstance(provenance, dict):
+        for path in list(provenance):
+            if path == "entity.ts_code" or str(path).startswith("quote."):
+                provenance.pop(path, None)
+        if not provenance:
+            evidence.pop("provenance", None)
+    return evidence
+
+
+def _last_successful_call(
+    ledger: Sequence[Mapping[str, Any]],
+    tool_name: str,
+) -> tuple[int, Mapping[str, Any], Mapping[str, Any]] | None:
+    for call_index in range(len(ledger) - 1, -1, -1):
+        row = ledger[call_index]
+        if row.get("tool_name") != tool_name or row.get("error") is not None:
+            continue
+        result = row.get("result")
+        if isinstance(result, Mapping):
+            return call_index, row, result
+    return None
+
+
+def _field_provenance(
+    *,
+    tool_name: str,
+    call_index: int,
+    result_field: str,
+    fault_injection: Any = None,
+) -> dict[str, Any]:
+    provenance = {
+        "tool_name": tool_name,
+        "call_index": call_index,
+        "result_path": f"result.{result_field}",
+    }
+    if isinstance(fault_injection, Mapping):
+        provenance["fault_injection"] = deepcopy(dict(fault_injection))
+    return provenance
+
+
+def _normalize_compact_date(value: Any) -> Any:
+    if not isinstance(value, str) or len(value) != 8 or not value.isdigit():
+        return value
+    try:
+        return datetime.strptime(value, "%Y%m%d").strftime("%Y-%m-%d")
+    except ValueError:
+        return value
+
+
+def _merge_mapping(target: dict[str, Any], source: Mapping[str, Any]) -> None:
+    """Recursively merge source into target, with projected source values winning."""
+    for key, value in source.items():
+        existing = target.get(key)
+        if isinstance(existing, dict) and isinstance(value, Mapping):
+            _merge_mapping(existing, value)
+        else:
+            target[key] = deepcopy(value)
+
+
 def _project_tools(ledger: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     calls: list[dict[str, Any]] = []
     names: list[str] = []
@@ -324,6 +472,7 @@ def _project_tools(ledger: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             "result": deepcopy(row.get("result")),
             "error": deepcopy(row.get("error")),
             "idempotency_key": deepcopy(row.get("idempotency_key")),
+            "fault_injection": deepcopy(row.get("fault_injection")),
         }
         calls.append(call)
         names.append(name)

@@ -296,7 +296,10 @@ class DirectToolLoopBusinessExecutor:
                 conversation = list(final.messages)
                 total_cost += final.budget_spent_cny
                 total_tokens += final.budget_spent_tokens
-                for call in extract_business_tool_ledger(final):
+                for call in extract_business_tool_ledger(
+                    final,
+                    fault_plans=context.fault_plans,
+                ):
                     call_id = str(call["idempotency_key"])
                     if call_id in seen_tool_call_ids:
                         continue
@@ -353,7 +356,11 @@ def observation_as_evidence(observation: BusinessObservation) -> dict[str, Any]:
     return asdict(observation)
 
 
-def extract_business_tool_ledger(state: Any) -> tuple[dict[str, Any], ...]:
+def extract_business_tool_ledger(
+    state: Any,
+    *,
+    fault_plans: tuple[FaultPlan, ...] = (),
+) -> tuple[dict[str, Any], ...]:
     """Join assistant tool requests to tool responses without losing raw facts."""
     responses = {
         str(message.get("tool_call_id")): message.get("content")
@@ -388,15 +395,21 @@ def extract_business_tool_ledger(state: Any) -> tuple[dict[str, Any], ...]:
                     result = json.loads(content) if isinstance(content, str) else content
                 except json.JSONDecodeError:
                     error = "tool response is not valid JSON"
-            rows.append(
-                {
-                    "tool_name": name,
-                    "arguments": arguments,
-                    "result": result,
-                    "error": error,
-                    "idempotency_key": call_id,
+            row = {
+                "tool_name": name,
+                "arguments": arguments,
+                "result": result,
+                "error": error,
+                "idempotency_key": call_id,
+            }
+            plan = next((item for item in fault_plans if item.target == name), None)
+            if plan is not None:
+                row["fault_injection"] = {
+                    "injected": True,
+                    "mode": plan.mode,
+                    "target": plan.target,
                 }
-            )
+            rows.append(row)
     return tuple(rows)
 
 

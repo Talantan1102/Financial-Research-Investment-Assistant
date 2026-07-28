@@ -48,7 +48,7 @@ async def test_timeout_fault_returns_declared_error_without_calling_inner() -> N
 
 
 @pytest.mark.asyncio
-async def test_stale_fault_mutates_only_target_result() -> None:
+async def test_stale_fault_returns_declared_payload_without_calling_live_tool() -> None:
     inner = Mock()
     inner.schemas_for_llm.return_value = [
         {"type": "function", "function": {"name": "get_market_clock"}}
@@ -86,6 +86,59 @@ async def test_stale_fault_mutates_only_target_result() -> None:
         "fault_injected": True,
         "fault_mode": "stale",
     }
+    inner.dispatch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_mixed_live_and_stale_calls_preserve_original_result_order() -> None:
+    inner = Mock()
+    inner.schemas_for_llm.return_value = [
+        {"type": "function", "function": {"name": name}}
+        for name in ("live_a", "stale_b", "live_c", "stale_d")
+    ]
+    inner.dispatch = AsyncMock(
+        return_value=[
+            ToolResult(
+                tool_name="live_a",
+                args={"slot": "a"},
+                success=True,
+                output={"value": "live-a"},
+                latency_ms=1,
+            ),
+            ToolResult(
+                tool_name="live_c",
+                args={"slot": "c"},
+                success=True,
+                output={"value": "live-c"},
+                latency_ms=1,
+            ),
+        ]
+    )
+    hub = FaultInjectingHub(
+        inner,
+        [
+            FaultPlan(target="stale_b", mode="stale", payload={"value": "stale-b"}),
+            FaultPlan(target="stale_d", mode="stale", payload={"value": "stale-d"}),
+        ],
+    )
+    calls = [
+        StepToolCall(id="a", name="live_a", arguments='{"slot":"a"}'),
+        StepToolCall(id="b", name="stale_b", arguments='{"slot":"b"}'),
+        StepToolCall(id="c", name="live_c", arguments='{"slot":"c"}'),
+        StepToolCall(id="d", name="stale_d", arguments='{"slot":"d"}'),
+    ]
+
+    results = await hub.dispatch(calls, _state())
+
+    assert [item.tool_name for item in results] == ["live_a", "stale_b", "live_c", "stale_d"]
+    assert [item.output for item in results] == [
+        {"value": "live-a"},
+        {"value": "stale-b"},
+        {"value": "live-c"},
+        {"value": "stale-d"},
+    ]
+    forwarded = inner.dispatch.await_args.args[0]
+    assert [item.name for item in forwarded] == ["live_a", "live_c"]
 
 
 def test_fault_target_that_is_not_a_registered_tool_fails_loudly() -> None:
