@@ -113,6 +113,7 @@ class PaperTradingOutcomeScore:
     risk_and_pause: bool
     resume_semantics: bool
     database_terminal_state: bool
+    terminal_outcome: bool
     detail: str
 
     @property
@@ -219,6 +220,7 @@ class PaperTradingOutcomeScorer:
                 risk_and_pause=False,
                 resume_semantics=False,
                 database_terminal_state=False,
+                terminal_outcome=False,
                 detail="invalid or incomplete outcome contract",
             )
         if not self._complete_observation(database_state) or not self._complete_observation(
@@ -231,6 +233,7 @@ class PaperTradingOutcomeScorer:
                 risk_and_pause=False,
                 resume_semantics=False,
                 database_terminal_state=False,
+                terminal_outcome=False,
                 detail="missing observed Run or database state",
             )
         names = [str(call.get("tool_name", "")) for call in tool_calls]
@@ -244,6 +247,7 @@ class PaperTradingOutcomeScorer:
                 risk_and_pause=False,
                 resume_semantics=False,
                 database_terminal_state=False,
+                terminal_outcome=False,
                 detail=f"failed: forbidden_tools={forbidden_hits}",
             )
         invalid_observation = self._invalid_tool_observation(expected, tool_calls)
@@ -255,6 +259,7 @@ class PaperTradingOutcomeScorer:
                 risk_and_pause=False,
                 resume_semantics=False,
                 database_terminal_state=False,
+                terminal_outcome=False,
                 detail=invalid_observation,
             )
         required = [str(name) for name in expected.get("expected_tools", [])]
@@ -309,11 +314,18 @@ class PaperTradingOutcomeScorer:
             if before_value is _MISSING or after_value is _MISSING or before_value != after_value:
                 db_ok = False
 
+        expected_terminal = expected_run.get("outcome")
+        terminal_outcome_ok = (
+            True
+            if expected_terminal is None
+            else _partial_match(expected_terminal, observed_run.get("outcome"))
+        )
         parts = {
             "tool_trajectory": trajectory_ok,
             "risk_and_pause": risk_and_pause,
             "resume_semantics": resume_ok,
             "database_terminal_state": db_ok,
+            "terminal_outcome": terminal_outcome_ok,
         }
         passed = all(parts.values())
         score = 0.0 if forbidden_hits else sum(parts.values()) / len(parts)
@@ -328,6 +340,7 @@ class PaperTradingOutcomeScorer:
             risk_and_pause=risk_and_pause,
             resume_semantics=resume_ok,
             database_terminal_state=db_ok,
+            terminal_outcome=terminal_outcome_ok,
             detail=detail,
         )
 
@@ -342,7 +355,7 @@ class PaperTradingOutcomeScorer:
         database = expected.get("database_assertions")
         return (
             expected.get("version") == 1
-            and expected.get("type") in {"paper_trading", "watchlist"}
+            and expected.get("type") in {"paper_trading", "watchlist", "market_permission"}
             and isinstance(tools, list)
             and bool(tools)
             and isinstance(risks, dict)
@@ -381,6 +394,10 @@ class PaperTradingOutcomeScorer:
             and isinstance(database, dict)
             and bool(database)
             and _permission_contract_is_consistent(expected)
+            and (
+                expected.get("type") != "market_permission"
+                or isinstance(expected.get("market"), str)
+            )
         )
 
     @staticmethod

@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.chatloop.approval_edits import ApprovedInput
 from app.chatloop.contracts import ToolResult
+from app.chatloop.outcomes import ActionRequiredOutcome
 from app.services.llm_step import StepResult, StepToolCall
 
 # ---------------------------------------------------------------------------
@@ -166,6 +167,7 @@ class ChatLoopState(BaseModel):
     context_pressure_passes: int = 0
     context_pressure_floor_hit: bool = False
     final_response: str | None = None  # = 最后一条 assistant content
+    required_action: ActionRequiredOutcome | None = None
     approved_inputs: dict[str, ApprovedInput] = Field(default_factory=dict, exclude=True)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)

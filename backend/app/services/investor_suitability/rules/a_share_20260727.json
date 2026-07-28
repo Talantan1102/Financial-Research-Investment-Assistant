@@ -1,0 +1,33 @@
+{
+  "rulebook_version": "a-share-20260727",
+  "rules": [
+    {
+      "market": "main",
+      "rule_version": "main-2026-07-27",
+      "minimum_average_assets_20d": null,
+      "minimum_experience_months": null,
+      "required_disclosure_version": "main-risk-disclosure-2026-07"
+    },
+    {
+      "market": "chinext",
+      "rule_version": "chinext-2026-07-27",
+      "minimum_average_assets_20d": "100000",
+      "minimum_experience_months": 24,
+      "required_disclosure_version": "chinext-risk-disclosure-2026-07"
+    },
+    {
+      "market": "star",
+      "rule_version": "star-2026-07-27",
+      "minimum_average_assets_20d": "500000",
+      "minimum_experience_months": 24,
+      "required_disclosure_version": "star-risk-disclosure-2026-07"
+    },
+    {
+      "market": "bse",
+      "rule_version": "bse-2026-07-27",
+      "minimum_average_assets_20d": "500000",
+      "minimum_experience_months": 24,
+      "required_disclosure_version": "bse-risk-disclosure-2026-07"
+    }
+  ]
+}

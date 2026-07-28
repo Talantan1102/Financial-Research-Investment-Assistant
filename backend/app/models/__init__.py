@@ -49,6 +49,17 @@ else:
     # mapper targets; these modules have no heavyweight runtime dependencies.
     from .chat import ChatSession, LongTermMemory
     from .knowledge import Document, KnowledgeBase
+from .investor_suitability import (
+    ApplicationStatus,
+    EntitlementApplication,
+    EntitlementStatus,
+    InvestorSuitabilityProfile,
+    Market,
+    MarketAccessRule,
+    MarketEntitlement,
+    RiskDisclosureAcceptance,
+    SuitabilityAssessment,
+)
 from .paper_account import (
     PaperAccount,
     PaperAccountResetAudit,
@@ -107,6 +118,15 @@ __all__ = [
     "PaperFill",
     "PaperLotReservation",
     "PaperMatchPass",
+    "Market",
+    "EntitlementStatus",
+    "ApplicationStatus",
+    "InvestorSuitabilityProfile",
+    "MarketAccessRule",
+    "SuitabilityAssessment",
+    "RiskDisclosureAcceptance",
+    "MarketEntitlement",
+    "EntitlementApplication",
     "WatchlistItem",
     "WatchlistAudit",
 ]

@@ -30,6 +30,12 @@ from app.chatloop.control_tools import OfferDeepResearchTool, ReadCachedResultTo
 from app.chatloop.events import SeqCounter
 from app.chatloop.gates import GateConfig
 from app.chatloop.manage_watchlist_tool import ManageWatchlistTool, SqlWatchlistBackend
+from app.chatloop.market_permission_tools import (
+    CheckOrderEligibilityTool,
+    GetEntitlementApplicationLinkTool,
+    GetMarketEntitlementsTool,
+    SqlMarketPermissionBackend,
+)
 from app.chatloop.memory_tools import MemorySearchTool, MemoryWriteTool
 from app.chatloop.paper_trade_schemas import (
     CancelPaperOrderArgs,
@@ -273,6 +279,7 @@ def build_turn_components(
     from app.skills.executor_backend import SkillExecutorBackend
 
     paper_backend = SqlPaperTradingBackend(singletons.sync_session_factory)
+    market_permission_backend = SqlMarketPermissionBackend(singletons.sync_session_factory)
     watchlist_backend = SqlWatchlistBackend(singletons.sync_session_factory)
     hub.register_inprocess(
         [
@@ -290,6 +297,9 @@ def build_turn_components(
             GetPaperAccountTool(paper_backend),
             ListPaperOrdersTool(paper_backend),
             GetPaperOrderTool(paper_backend),
+            GetMarketEntitlementsTool(market_permission_backend),
+            CheckOrderEligibilityTool(market_permission_backend),
+            GetEntitlementApplicationLinkTool(market_permission_backend),
             PlacePaperOrderTool(paper_backend),
             CancelPaperOrderTool(paper_backend),
             ResetPaperAccountTool(paper_backend),

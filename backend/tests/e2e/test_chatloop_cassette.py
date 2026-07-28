@@ -149,6 +149,22 @@ _FAKE_RESULTS: dict[str, dict[str, Any]] = {
     "cancel_paper_order": {"error": "paper/watchlist tools unavailable in cassette harness"},
     "reset_paper_account": {"error": "paper/watchlist tools unavailable in cassette harness"},
     "manage_watchlist": {"error": "paper/watchlist tools unavailable in cassette harness"},
+    # Market-permission tools are read-only in the Agent.  Keep their harness
+    # responses deterministic so a tool-table addition cannot break unrelated
+    # recorded LLM trajectories.
+    "get_market_entitlements": {"entitlements": []},
+    "check_order_eligibility": {
+        "allowed": False,
+        "required_permission": "star",
+        "market": "star",
+        "side": "buy",
+        "application_url": "/market-permissions/star/apply",
+    },
+    "get_entitlement_application_link": {
+        "market": "star",
+        "application_url": "/market-permissions/star/apply",
+        "intent_summary": "申请 star 市场交易权限",
+    },
 }
 
 

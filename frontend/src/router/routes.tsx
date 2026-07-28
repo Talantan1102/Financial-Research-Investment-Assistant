@@ -8,6 +8,8 @@ import ChatLandingPage from '@/pages/chat/landing'
 import ChatSessionPage from '@/pages/chat/session'
 import KnowledgePage from '@/pages/knowledge'
 import MemoryPage from '@/pages/memory'
+import MarketPermissionsPage from '@/pages/market-permissions'
+import PermissionApplicationPage from '@/pages/market-permissions/application'
 import MonitoringIndex from '@/pages/monitoring'
 import AlertDetail from '@/pages/monitoring/alert-detail'
 import MonitoringConfig from '@/pages/monitoring/config'
@@ -51,6 +53,8 @@ export const routes: IRouteObject[] = [
   { path: '/monitoring/:cid/alert/:aid', Component: AlertDetail },
   { path: '/monitoring/config', Component: MonitoringConfig },
   { path: '/memory', Component: MemoryPage },
+  { path: '/market-permissions', Component: MarketPermissionsPage },
+  { path: '/market-permissions/:market/apply', Component: PermissionApplicationPage },
   { path: '/404', Component: NotFound, pure: true },
 ]
 

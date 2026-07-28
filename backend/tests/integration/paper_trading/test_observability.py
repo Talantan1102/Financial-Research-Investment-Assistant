@@ -12,6 +12,12 @@ from typing import cast
 import app.services.paper_trading.observability as paper_observability
 import app.tasks.paper_trading as paper_tasks
 import pytest
+from app.models.investor_suitability import (
+    EntitlementStatus,
+    Market,
+    MarketAccessRule,
+    MarketEntitlement,
+)
 from app.models.paper_account import PaperAccount
 from app.models.paper_order import OrderSide, OrderStatus, OrderType, PaperOrder
 from app.models.user import User
@@ -72,6 +78,41 @@ def _chain_service(session: Session) -> PaperOrderService:
         rulebook=RuleBook.from_builtin_fixture(),
         now=lambda: CHAIN_NOW,
     )
+
+
+def _enable_main(session: Session, account: PaperAccount) -> None:
+    rule = session.scalar(
+        select(MarketAccessRule).where(
+            MarketAccessRule.market == Market.MAIN,
+            MarketAccessRule.rule_version == "test-main-v1",
+        )
+    )
+    if rule is None:
+        rule = MarketAccessRule(
+            market=Market.MAIN,
+            effective_from=CHAIN_NOW.date(),
+            minimum_average_assets_20d=None,
+            minimum_experience_months=None,
+            required_disclosure_version="main-risk-v1",
+            rule_version="test-main-v1",
+        )
+        session.add(rule)
+        session.flush()
+    session.add(
+        MarketEntitlement(
+            account_id=account.id,
+            account_generation=account.generation,
+            market=Market.MAIN,
+            status=EntitlementStatus.ENABLED,
+            can_buy=True,
+            can_sell=True,
+            can_subscribe=False,
+            rule_version=rule.rule_version,
+            enabled_at=CHAIN_NOW,
+            restricted_at=None,
+        )
+    )
+    session.flush()
 
 
 @pytest.fixture
@@ -746,7 +787,8 @@ def test_real_confirm_dispatch_match_settle_chain_persists_parentage_and_retry_o
         )
         setup.add(user)
         setup.flush()
-        PaperAccountService(setup).get_or_create(user_id=cast(uuid.UUID, user.id))
+        account = PaperAccountService(setup).get_or_create(user_id=cast(uuid.UUID, user.id))
+        _enable_main(setup, account)
         order, _preview = _chain_service(setup).prepare_order(
             user_id=cast(uuid.UUID, user.id),
             session_id="chain-session",

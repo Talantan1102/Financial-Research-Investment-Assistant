@@ -14,10 +14,11 @@ from types import SimpleNamespace
 import httpx
 import pytest
 import pytest_asyncio
+from app.models.run import Run
 from app.models.tenant import Tenant, TenantMembership
 from app.models.user import User
 from app.router.auth_router import get_current_user_required
-from app.router.runs import get_run_service, router
+from app.router.runs import _format_sse, _format_stream_sse, get_run_service, router
 from app.run_control.types import PauseType, RunStatus
 from app.services.run_service import RunService
 from app.services.trace_models import TraceSpanRow
@@ -576,6 +577,75 @@ async def test_sse_drains_terminal_event_committed_between_event_and_status_read
         response = await client.get(f"{_run_url(tenant.id)}/{run_id}/events")
 
     assert [item["id"] for item in _sse_frames(response.text)] == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_run_snapshot_and_completed_sse_expose_only_a_valid_typed_outcome(
+    api_context: tuple[Tenant, dict[str, User]],
+    client_for: ClientFactory,
+    async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    tenant, users = api_context
+    async with client_for(users["member"]) as client:
+        created = await _create_run(client, tenant.id)
+        run_id = uuid.UUID(created.json()["id"])
+
+    outcome = {
+        "code": "action_required",
+        "action_type": "apply_market_permission",
+        "action_url": "/market-permissions/apply?market=star",
+        "action_label": "申请科创板权限",
+        "resume_hint": "完成后回来重新下单",
+        "intent_summary": "买入科创板股票",
+    }
+    async with async_session_factory() as session, session.begin():
+        run = await session.get(Run, run_id)
+        assert run is not None
+        run.outcome_code = "action_required"
+        run.outcome_payload = outcome
+
+    async with client_for(users["member"]) as client:
+        snapshot = await client.get(f"{_run_url(tenant.id)}/{run_id}")
+    assert snapshot.status_code == 200
+    assert snapshot.json()["outcome"] == outcome
+
+    replay = _format_sse(
+        SimpleNamespace(seq=1, event_type="run.completed", payload={"outcome": outcome}),
+        1,
+    )
+    live = _format_stream_sse(
+        SimpleNamespace(
+            envelope=SimpleNamespace(kind="run.completed", payload={"outcome": outcome}),
+        ),
+        "1-0",
+    )
+    assert json.loads(replay.split("data: ", 1)[1])["outcome"] == outcome
+    assert json.loads(live.split("data: ", 1)[1])["outcome"] == outcome
+
+    invalid = {"code": "action_required", "action_url": "https://invalid.example"}
+    async with async_session_factory() as session, session.begin():
+        run = await session.get(Run, run_id)
+        assert run is not None
+        run.outcome_payload = invalid
+
+    async with client_for(users["member"]) as client:
+        invalid_snapshot = await client.get(f"{_run_url(tenant.id)}/{run_id}")
+    assert invalid_snapshot.status_code == 200
+    assert invalid_snapshot.json()["outcome"] is None
+    assert "outcome" not in json.loads(
+        _format_sse(
+            SimpleNamespace(seq=2, event_type="run.completed", payload={"outcome": invalid}),
+            2,
+        ).split("data: ", 1)[1]
+    )
+    assert "outcome" not in json.loads(
+        _format_stream_sse(
+            SimpleNamespace(
+                envelope=SimpleNamespace(kind="run.completed", payload={"outcome": invalid}),
+            ),
+            "2-0",
+        ).split("data: ", 1)[1]
+    )
 
 
 @pytest.mark.asyncio

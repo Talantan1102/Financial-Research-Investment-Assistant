@@ -7,6 +7,7 @@ import { InputArea } from './InputArea'
 import { MessageList } from './MessageList'
 import { StreamingIndicator } from './StreamingIndicator'
 import { PaperApprovalCard } from './PaperApprovalCard'
+import { ActionRequiredCard } from './ActionRequiredCard'
 import { useDeferredMessages } from './useDeferredMessages'
 import { useRunSSE } from '@/hooks/useRunSSE'
 import { currentChatState } from '@/store/current-chat'
@@ -93,9 +94,10 @@ export interface ChatPaneProps {
   initialLatestRunId?: string | null
   initialRevisionCursor?: string | null
   initialRevisionsHasMore?: boolean
+  initialOutcome?: import('@/api/runApi').ActionRequiredOutcome | null
 }
 
-export function ChatPane({ sessionId: sessionIdProp, tenantId: tenantIdProp, initialRunId, initialRunStatus, initialPause, initialRevisions, initialLatestRunId, initialRevisionCursor, initialRevisionsHasMore, sessionLoading = false }: ChatPaneProps = {}) {
+export function ChatPane({ sessionId: sessionIdProp, tenantId: tenantIdProp, initialRunId, initialRunStatus, initialPause, initialRevisions, initialLatestRunId, initialRevisionCursor, initialRevisionsHasMore, initialOutcome, sessionLoading = false }: ChatPaneProps = {}) {
   const params = useParams<{ session_id: string }>()
   const navigate = useNavigate()
   const sessionId = sessionIdProp ?? params.session_id ?? null
@@ -131,6 +133,7 @@ export function ChatPane({ sessionId: sessionIdProp, tenantId: tenantIdProp, ini
     initialLatestRunId,
     initialRevisionCursor,
     initialRevisionsHasMore,
+    initialOutcome,
     onSessionCreated: (createdSessionId) => {
       navigate(`/chat/${createdSessionId}`, { replace: true })
     },
@@ -183,6 +186,9 @@ export function ChatPane({ sessionId: sessionIdProp, tenantId: tenantIdProp, ini
             <MessageList messages={displayMessages} onContinueAsk={onContinueAsk} />
           )}
           <DispatchLanes />
+          {run.outcome ? (
+            <ActionRequiredCard outcome={run.outcome} onContinue={(prompt) => { void run.sendPrompt(prompt) }} />
+          ) : null}
           {revisions.length > 0 ? (
             <details>
               <summary>修订历史</summary>

@@ -520,7 +520,16 @@ class DurableRunHttpTransport:
             )
             return (
                 calls,
-                {"pauses": pause_trace, "resumed": any(p.resolved_at for p in pauses)},
+                {
+                    "pauses": pause_trace,
+                    "resumed": any(p.resolved_at for p in pauses),
+                    "outcome": None
+                    if run.outcome_code is None
+                    else {
+                        "code": str(run.outcome_code),
+                        "payload": dict(run.outcome_payload or {}),
+                    },
+                },
                 "" if final is None else str(final.content),
             )
 
@@ -667,6 +676,10 @@ class SqlOutcomeCollector:
                 confirmation_id=digest,
             )
             return
+        if outcome_type == "market_permission":
+            # This evaluator observes a separately completed suitability flow.
+            # It must not simulate applications or alter entitlement facts.
+            return
         if outcome_type != "watchlist":
             raise RuntimeError(f"unsupported stateful outcome type: {outcome_type}")
 
@@ -713,6 +726,7 @@ class SqlOutcomeCollector:
         run_id: str | None,
         scenario: Scenario,
     ) -> dict[str, Any]:
+        from app.models.investor_suitability import MarketEntitlement
         from app.models.paper_account import PaperAccount
         from app.models.paper_order import PaperOrder
         from app.models.run import Run
@@ -771,6 +785,18 @@ class SqlOutcomeCollector:
                 (scenario.outcome or {}).get("tool_args_contains", {}).get("manage_watchlist", {})
             )
             target_code = expected_args.get("ts_code")
+            entitlement = None
+            market = (scenario.outcome or {}).get("market")
+            if isinstance(market, str) and account is not None:
+                entitlement = await session.scalar(
+                    select(MarketEntitlement)
+                    .where(
+                        MarketEntitlement.account_id == account.id,
+                        MarketEntitlement.account_generation == account.generation,
+                        MarketEntitlement.market == market,
+                    )
+                    .limit(1)
+                )
             item_statement = select(WatchlistItem).where(WatchlistItem.user_id == uid)
             if target_code:
                 item_statement = item_statement.where(WatchlistItem.ts_code == target_code)
@@ -819,6 +845,14 @@ class SqlOutcomeCollector:
                     "after": audit.after_json,
                 },
             }
+            if entitlement is not None:
+                snapshot["entitlement"] = {
+                    "market": str(entitlement.market),
+                    "status": str(entitlement.status),
+                    "can_buy": bool(entitlement.can_buy),
+                    "can_sell": bool(entitlement.can_sell),
+                    "can_subscribe": bool(entitlement.can_subscribe),
+                }
             if order is not None:
                 snapshot["order"] = {
                     "ts_code": str(order.ts_code),

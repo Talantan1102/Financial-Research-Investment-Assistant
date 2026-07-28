@@ -130,6 +130,29 @@ describe('useRunSSE', () => {
     expect(result.current.activeRunId).toBeNull()
   })
 
+  it('keeps completed status while exposing an action-required terminal outcome', async () => {
+    vi.mocked(runApi.fetchRunEvents).mockResolvedValue(chunkedSse([
+      'id: v1:2:1-1\nevent: run.completed\ndata: {"content":"先开通权限",' +
+        '"outcome":{"code":"action_required","action_type":"apply_market_permission",' +
+        '"action_url":"/market-permissions/star/apply","action_label":"申请科创板权限",' +
+        '"resume_hint":"完成后返回","intent_summary":"买入中芯国际 100 股"}}\n\n',
+    ]))
+    const { result } = renderHook(() => useRunSSE({
+      tenantId: 'tenant-1', sessionId: 'session-1',
+    }))
+
+    await act(async () => result.current.sendPrompt('买入中芯国际'))
+
+    await waitFor(() => {
+      expect(result.current.status).toBe('completed')
+      expect(result.current.activeRunId).toBeNull()
+      expect(result.current.pause).toBeNull()
+      expect(result.current.outcome).toEqual(expect.objectContaining({
+        code: 'action_required', action_url: '/market-permissions/star/apply',
+      }))
+    })
+  })
+
   it('reconnects with the opaque cursor unchanged, ignores duplicate frames and uses bounded backoff', async () => {
     vi.mocked(runApi.getRun)
       .mockResolvedValueOnce(run('running'))

@@ -4,10 +4,12 @@
   "verified_on": "2026-07-18",
   "sources": [
     "https://www.sse.com.cn/lawandrules/sselawsrules2025/fund/trading/c/c_20260424_10817739.shtml",
-    "https://www.szse.cn/lawrules/rule/allrules/bussiness/t20260424_620190.html"
+    "https://www.szse.cn/lawrules/rule/allrules/bussiness/t20260424_620190.html",
+    "https://www.bse.cn/uploads/6/file/public/202111/20211119182131_imqohh30d0.pdf"
   ],
   "defaults": {
-    "buy_lot_size": 100,
+    "minimum_order_quantity": 100,
+    "quantity_increment": 100,
     "price_tick": "0.01",
     "quote_freshness_seconds": 15
   },
@@ -23,6 +25,12 @@
     "chinext": {
       "normal_limit_ratio": "0.20",
       "risk_warning_limit_ratio": "0.20"
+    },
+    "bse": {
+      "normal_limit_ratio": "0.30",
+      "risk_warning_limit_ratio": "0.30",
+      "minimum_order_quantity": 100,
+      "quantity_increment": 1
     }
   }
 }

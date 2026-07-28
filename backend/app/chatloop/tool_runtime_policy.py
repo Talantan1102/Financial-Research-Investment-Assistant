@@ -98,6 +98,9 @@ TOOL_RISK_METADATA: dict[str, ToolRiskMetadata] = {
     "get_paper_account": _READ,
     "list_paper_orders": _READ,
     "get_paper_order": _READ,
+    "get_market_entitlements": _READ,
+    "check_order_eligibility": _READ,
+    "get_entitlement_application_link": _READ,
     "manage_watchlist": ToolRiskMetadata(
         RiskLevel.LOW,
         CapabilityType.DATA_TOOL,

@@ -48,6 +48,23 @@ class Scenario:
         value = self.expected.get("outcome")
         return value if isinstance(value, dict) else None
 
+    @property
+    def required_tools(self) -> set[str]:
+        """Durable outcome tools the scenario requires, independent of tool-selection projection."""
+        outcome = self.outcome or {}
+        return {str(tool) for tool in outcome.get("expected_tools", [])}
+
+    @property
+    def forbidden_tools(self) -> set[str]:
+        outcome = self.outcome or {}
+        return {str(tool) for tool in outcome.get("forbidden_tools", [])}
+
+    @property
+    def expected_outcome(self) -> str | None:
+        outcome = self.outcome or {}
+        terminal = outcome.get("run", {}).get("outcome")
+        return terminal.get("code") if isinstance(terminal, dict) else None
+
     def to_ts_case(self) -> GoldenCase:
         """投影成 tool_selection.GoldenCase —— 复用其 score_case(行为①②③)。"""
         return GoldenCase(
@@ -124,7 +141,7 @@ def _validate_outcome(case_id: str, outcome: Any, interaction: Any) -> None:
         _fail(f"{case_id}: outcome 须为对象")
     if outcome.get("version") != 1:
         _fail(f"{case_id}: outcome.version 只支持 1")
-    if outcome.get("type") not in {"paper_trading", "watchlist"}:
+    if outcome.get("type") not in {"paper_trading", "watchlist", "market_permission"}:
         _fail(f"{case_id}: outcome.type 非法")
     required = (
         "expected_tools",
@@ -207,6 +224,18 @@ def _validate_outcome(case_id: str, outcome: Any, interaction: Any) -> None:
         or type(run["resumed"]) is not bool
     ):
         _fail(f"{case_id}: outcome.run 必须明确 pause_type/resumed/status")
+    terminal_outcome = run.get("outcome")
+    if terminal_outcome is not None:
+        if (
+            not isinstance(terminal_outcome, dict)
+            or terminal_outcome.get("code") != "action_required"
+        ):
+            _fail(f"{case_id}: outcome.run.outcome 必须是 action_required")
+        payload = terminal_outcome.get("payload")
+        if not isinstance(payload, dict) or not isinstance(payload.get("action_url"), str):
+            _fail(f"{case_id}: outcome.run.outcome.payload.action_url 缺失")
+    if outcome.get("type") == "market_permission" and not isinstance(outcome.get("market"), str):
+        _fail(f"{case_id}: market_permission outcome 缺少 market")
     if not isinstance(database_assertions, dict) or not database_assertions:
         _fail(f"{case_id}: outcome.database_assertions 须为非空对象")
     if run["pause_type"] == "approval":

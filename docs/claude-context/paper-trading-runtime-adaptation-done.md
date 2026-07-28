@@ -80,3 +80,9 @@ Windows Job Object focused 测试还实际验证了：小程序在限制内成�
 
 - `docs/superpowers/specs/2026-07-23-paper-trading-runtime-adaptation-design.md`
 - `docs/superpowers/plans/2026-07-23-paper-trading-runtime-adaptation.md`
+
+## 市场权限与需用户操作终态
+
+纸面交易按主板、创业板、科创板和北交所分别核验账户权限。权限不足时，Agent 只能查询资格、返回站内申请链接，并将当前 Run 正常完成为 `action_required`；它不能代用户申请、签署披露或开通权限。用户完成既有申请流程后，必须在新的一轮对话重新发起交易请求，系统会重新核验权限，绝不自动恢复旧订单。
+
+本次实际验证包括：市场权限申请 API/服务测试、纸面交易权限门控测试、Run 的 `action_required` API/E2E 测试、前端权限页面与结果卡片单测。浏览器旅程在本地 Vite 与 mock 后端下实际运行，覆盖“申请—取消—重新申请—完成”及“旧 Run 结束—用户确认后创建新 Run”。

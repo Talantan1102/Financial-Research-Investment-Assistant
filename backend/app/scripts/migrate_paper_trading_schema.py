@@ -7,12 +7,20 @@ import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from sqlalchemy import Table, inspect, text
+from sqlalchemy import Enum, Table, inspect, text
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.schema import AddConstraint, CreateIndex
 
 import app.models  # noqa: F401 - register the complete metadata graph
 from app.core.database import Base
+from app.models.investor_suitability import (
+    EntitlementApplication,
+    InvestorSuitabilityProfile,
+    MarketAccessRule,
+    MarketEntitlement,
+    RiskDisclosureAcceptance,
+    SuitabilityAssessment,
+)
 from app.models.paper_account import (
     PaperAccount,
     PaperAccountResetAudit,
@@ -58,7 +66,18 @@ _DOMAIN_TABLES = tuple(
     )
 )
 _LEGACY_EXTENSIONS = (Position.__table__, Trade.__table__)
-_EXPECTED_TABLES = _DOMAIN_TABLES + _LEGACY_EXTENSIONS
+_SUITABILITY_TABLES = tuple(
+    model.__table__
+    for model in (
+        InvestorSuitabilityProfile,
+        MarketAccessRule,
+        SuitabilityAssessment,
+        RiskDisclosureAcceptance,
+        MarketEntitlement,
+        EntitlementApplication,
+    )
+)
+_EXPECTED_TABLES = _DOMAIN_TABLES + _LEGACY_EXTENSIONS + _SUITABILITY_TABLES
 
 
 def _unsafe(message: str) -> RuntimeError:
@@ -270,6 +289,72 @@ def _repair_watchlist_guard(connection: Connection, changes: list[str]) -> None:
     changes.append("repair watchlist append-only guard")
 
 
+def _suitability_enum_drift(connection: Connection) -> list[str]:
+    expected: dict[str, tuple[str, ...]] = {}
+    for table in _SUITABILITY_TABLES:
+        for column in table.columns:
+            if isinstance(column.type, Enum) and column.type.name is not None:
+                expected[str(column.type.name)] = tuple(str(value) for value in column.type.enums)
+
+    actual_rows = connection.execute(
+        text(
+            "SELECT t.typname, e.enumlabel "
+            "FROM pg_type t "
+            "JOIN pg_namespace n ON n.oid = t.typnamespace "
+            "JOIN pg_enum e ON e.enumtypid = t.oid "
+            "WHERE n.nspname = current_schema() AND t.typname = ANY(:names) "
+            "ORDER BY t.typname, e.enumsortorder"
+        ),
+        {"names": list(expected)},
+    ).all()
+    actual: dict[str, list[str]] = {name: [] for name in expected}
+    for type_name, label in actual_rows:
+        actual[str(type_name)].append(str(label))
+    return [
+        f"suitability enum {name} differs"
+        for name, labels in expected.items()
+        if tuple(actual[name]) != labels
+    ]
+
+
+def _suitability_trigger_drift(connection: Connection) -> list[str]:
+    rows = (
+        connection.execute(
+            text(
+                "SELECT c.relname "
+                "FROM pg_trigger t "
+                "JOIN pg_class c ON c.oid = t.tgrelid "
+                "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                "WHERE n.nspname = current_schema() "
+                "AND c.relname = ANY(:tables) AND NOT t.tgisinternal"
+            ),
+            {"tables": [table.name for table in _SUITABILITY_TABLES]},
+        )
+        .scalars()
+        .all()
+    )
+    return [f"{table_name} triggers differ" for table_name in sorted(set(rows))]
+
+
+def _suitability_schema_drift(connection: Connection) -> list[str]:
+    existing = set(inspect(connection).get_table_names())
+    missing = {table.name for table in _SUITABILITY_TABLES} - existing
+    drift = [f"missing suitability tables {sorted(missing)}"] if missing else []
+    for table in _SUITABILITY_TABLES:
+        if table.name in existing:
+            drift.extend(canonical_table_drift(connection, table))
+    if not missing:
+        drift.extend(_suitability_enum_drift(connection))
+        drift.extend(_suitability_trigger_drift(connection))
+    return drift
+
+
+def canonical_suitability_schema(bind: Engine | Connection) -> bool:
+    """Return whether suitability tables match their complete ORM contract."""
+    with _migration_connection(bind) as connection:
+        return not _suitability_schema_drift(connection)
+
+
 def _schema_drift(connection: Connection) -> list[str]:
     inspector = inspect(connection)
     existing = set(inspector.get_table_names())
@@ -279,6 +364,9 @@ def _schema_drift(connection: Connection) -> list[str]:
         if table.name not in existing:
             continue
         drift.extend(canonical_table_drift(connection, table))
+    if all(table.name in existing for table in _SUITABILITY_TABLES):
+        drift.extend(_suitability_enum_drift(connection))
+        drift.extend(_suitability_trigger_drift(connection))
     if "watchlist_audits" in existing:
         drift.extend(_watchlist_guard_drift(connection))
     return drift
@@ -323,9 +411,11 @@ def migrate_paper_trading_schema(
             # A truly fresh database is completed by the caller's create_all().
             return ()
 
-        Base.metadata.create_all(bind=connection, tables=_DOMAIN_TABLES)
+        Base.metadata.create_all(bind=connection, tables=_DOMAIN_TABLES + _SUITABILITY_TABLES)
         created = {table.name for table in _DOMAIN_TABLES} - existing
         changes.extend(f"create {table_name}" for table_name in sorted(created))
+        if {table.name for table in _SUITABILITY_TABLES} - existing:
+            changes.append("create investor suitability schema")
         _upgrade_position_scope(connection, changes)
         _upgrade_trade_scope(connection, changes)
         _repair_watchlist_guard(connection, changes)
