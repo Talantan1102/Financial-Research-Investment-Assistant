@@ -19,12 +19,14 @@ import sys
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from eval.chatloop.report import format_dry, format_outcome_scorecard, format_scorecard
 from eval.chatloop.scenario import Scenario, load_scenarios
 from eval.chatloop.scorers import BehaviorScore, PaperTradingOutcomeScore
-from eval.chatloop.sut_runner import SutResult
+
+if TYPE_CHECKING:
+    from eval.chatloop.sut_runner import SutResult
 
 _DEFAULT_GOLDEN = Path(__file__).resolve().parent / "golden" / "scenarios.jsonl"
 _MULTITURN_GOLDEN = Path(__file__).resolve().parent / "golden" / "multiturn.jsonl"
@@ -204,6 +206,11 @@ def main(argv: list[str] | None = None) -> int:
     import logging
 
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
+    effective_argv = list(sys.argv[1:] if argv is None else argv)
+    if "--business" in effective_argv:
+        from eval.chatloop.business_cli import run_business_cli
+
+        return run_business_cli(effective_argv).exit_code
     p = argparse.ArgumentParser(description="chatloop agent 行为评估")
     p.add_argument("--golden", default=str(_DEFAULT_GOLDEN))
     p.add_argument("--ci", action="store_true", help="确定性闸:noop k=1")
@@ -215,7 +222,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--dispatch", choices=["noop", "real"], default="noop")
     p.add_argument("--judge-model", default="qwen-plus", help="grounding 裁判模型(独立于 SUT)")
     p.add_argument("--limit", type=int, default=0, help="只跑前 N 条(0=全部,调试用)")
-    args = p.parse_args(argv)
+    args = p.parse_args(effective_argv)
 
     golden_path = Path(args.golden)
     if args.multiturn and args.golden == str(_DEFAULT_GOLDEN):
