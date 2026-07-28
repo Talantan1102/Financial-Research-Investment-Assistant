@@ -8,6 +8,7 @@ from eval.chatloop.artifact_store import ArtifactReference, ArtifactStore
 from eval.chatloop.policy_registry import Violation
 from eval.chatloop.recorder import (
     ChatloopEvalRecorder,
+    ChatloopEvalRunRow,
     ChatloopEvalTrialRow,
     ChatloopEvalViolationRow,
     TrialRecord,
@@ -93,6 +94,43 @@ def test_trial_row_preserves_null_pass_for_invalid_evidence(db_session: Session,
     assert row.task_pass is None
     assert row.artifact_sha256 == artifact.sha256
     assert row.failure_reason == "missing database snapshot"
+
+
+def test_business_run_can_transition_from_running_to_terminal(db_session: Session) -> None:
+    recorder = ChatloopEvalRecorder(
+        session_factory=_session_factory(db_session),
+        initialize_schema=False,
+    )
+    recorder.record(
+        {
+            "run_id": "business-run-1",
+            "created_at": "2026-07-28T00:00:00+00:00",
+            "git_sha": "deadbeef",
+            "mode": "business",
+            "case_count": 2,
+            "status": "running",
+            "config_json": {"case_ids": ["B1-01", "B1-02"]},
+        },
+        [],
+    )
+
+    recorder.finish_run(
+        "business-run-1",
+        status="completed_with_agent_failures",
+        duration_ms=321,
+        cost_cny=1.25,
+        total_tokens=456,
+        config_patch={"valid_trials": 2, "task_failures": 1},
+    )
+
+    row = db_session.get(ChatloopEvalRunRow, "business-run-1")
+    assert row is not None
+    assert row.status == "completed_with_agent_failures"
+    assert row.duration_ms == 321
+    assert row.cost_cny == 1.25
+    assert row.total_tokens == 456
+    assert row.config_json["case_ids"] == ["B1-01", "B1-02"]
+    assert row.config_json["task_failures"] == 1
 
 
 def test_trial_policy_violations_are_searchable_and_keep_escalation_ids(

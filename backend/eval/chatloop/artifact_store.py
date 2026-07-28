@@ -74,7 +74,10 @@ class ArtifactStore:
 
         payload = _canonical_json(bundle)
         digest = sha256(payload).hexdigest()
-        directory = (self.root / run_id / case_id).resolve()
+        # ``run_id`` and ``case_id`` were already restricted to single safe path
+        # components. Avoid ``Path.resolve()`` here: concurrent first writes can
+        # race while Windows resolves a directory that another thread is creating.
+        directory = self.root / run_id / case_id
         if not directory.is_relative_to(self.root):
             raise ValueError("artifact path must remain inside the result root")
         directory.mkdir(parents=True, exist_ok=True)

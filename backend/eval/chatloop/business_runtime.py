@@ -1,0 +1,362 @@
+"""Production composition and lifecycle for the business conversation evaluator."""
+
+from __future__ import annotations
+
+import os
+import subprocess
+import time
+from collections.abc import Callable, Sequence
+from hashlib import sha256
+from pathlib import Path
+from typing import Any
+
+from sqlalchemy.engine import URL
+
+from eval.chatloop.artifact_store import ArtifactStore
+from eval.chatloop.business_cli import (
+    BusinessCasePlan,
+    BusinessExecutor,
+    BusinessTrialOutcome,
+)
+from eval.chatloop.business_pipeline import BusinessPlanExecutor
+from eval.chatloop.business_runner import (
+    BusinessExecutionContext,
+    BusinessObservation,
+    BusinessRunner,
+    DirectToolLoopBusinessExecutor,
+)
+from eval.chatloop.disposable_runtime import DisposableEvalRuntime
+from eval.chatloop.environment import CaseEnvironmentManager
+from eval.chatloop.judge_calibration import JudgeCalibrationGate
+from eval.chatloop.policy_registry import PolicyRegistry
+from eval.chatloop.recorder import ChatloopEvalRecorder, new_run_id, now_iso
+from eval.chatloop.structured_evidence import (
+    SEMANTIC_JUDGE_PROMPT_SHA256,
+    SEMANTIC_JUDGE_RUBRIC_VERSION,
+    BusinessStructuredEvidenceProvider,
+    LLMSemanticEvidenceJudge,
+)
+
+RuntimeFactory = Callable[..., Any]
+RecorderFactory = Callable[[], Any]
+ComponentBuilder = Callable[..., BusinessExecutor]
+HistoryExporter = Callable[[], Any]
+
+
+class _UnavailableDurableExecutor:
+    async def execute(self, context: BusinessExecutionContext) -> BusinessObservation:
+        del context
+        raise RuntimeError("durable stack isolation was not preflighted")
+
+
+class ProductionBusinessExecutor:
+    """Provision, execute, persist, and prove cleanup for one CLI invocation."""
+
+    def __init__(
+        self,
+        *,
+        admin_dsn_factory: Callable[[], str] | None = None,
+        runtime_factory: RuntimeFactory | None = None,
+        recorder_factory: RecorderFactory | None = None,
+        component_builder: ComponentBuilder | None = None,
+        run_id_factory: Callable[[], str] = new_run_id,
+        history_exporter: HistoryExporter | None = None,
+    ) -> None:
+        self._admin_dsn_factory = admin_dsn_factory or _admin_dsn_from_env
+        self._runtime_factory = runtime_factory or DisposableEvalRuntime.provision
+        self._recorder_factory = recorder_factory or ChatloopEvalRecorder
+        self._component_builder = component_builder or _build_components
+        self._run_id_factory = run_id_factory
+        self._history_exporter = history_exporter or _export_history
+
+    async def __call__(
+        self,
+        plans: Sequence[BusinessCasePlan],
+    ) -> Sequence[BusinessTrialOutcome]:
+        frozen_plans = tuple(plans)
+        if not frozen_plans:
+            raise ValueError("business execution requires at least one plan")
+        run_id = self._run_id_factory()
+        started = time.perf_counter()
+        recorder = self._recorder_factory()
+        versions = _versions()
+        recorder.record(_run_start(run_id, frozen_plans, versions), [])
+        runtime: Any | None = None
+
+        try:
+            runtime = self._runtime_factory(
+                admin_dsn=self._admin_dsn_factory(),
+                run_id=run_id,
+            )
+            executor = self._component_builder(
+                runtime=runtime,
+                run_id=run_id,
+                plans=frozen_plans,
+                recorder=recorder,
+                versions=versions,
+            )
+            outcomes = tuple(await executor(frozen_plans))
+        except BaseException as execution_error:
+            if runtime is not None:
+                try:
+                    await runtime.aclose()
+                except BaseException as cleanup_error:
+                    _finish(
+                        recorder,
+                        run_id,
+                        started,
+                        status="runtime_leaked",
+                        config_patch={
+                            "failure": _error_text(execution_error),
+                            "cleanup_failure": _error_text(cleanup_error),
+                        },
+                    )
+                    raise cleanup_error from execution_error
+            _finish(
+                recorder,
+                run_id,
+                started,
+                status="harness_failed",
+                config_patch={"failure": _error_text(execution_error)},
+            )
+            raise
+
+        try:
+            await runtime.aclose()
+        except BaseException as cleanup_error:
+            _finish(
+                recorder,
+                run_id,
+                started,
+                status="runtime_leaked",
+                config_patch={"cleanup_failure": _error_text(cleanup_error)},
+            )
+            raise
+
+        invalid = sum(item.trial_status != "valid" for item in outcomes)
+        task_failures = sum(
+            item.trial_status == "valid" and item.task_pass is False for item in outcomes
+        )
+        if invalid:
+            status = "completed_with_invalid_trials"
+        elif task_failures:
+            status = "completed_with_agent_failures"
+        else:
+            status = "completed"
+        _finish(
+            recorder,
+            run_id,
+            started,
+            status=status,
+            config_patch={
+                "runtime_database": runtime.database_name,
+                "total_trials": len(outcomes),
+                "valid_trials": len(outcomes) - invalid,
+                "invalid_trials": invalid,
+                "task_failures": task_failures,
+            },
+        )
+        try:
+            self._history_exporter()
+        except Exception as export_error:
+            _finish(
+                recorder,
+                run_id,
+                started,
+                status="report_failed",
+                config_patch={"report_failure": _error_text(export_error)},
+            )
+            raise
+        return outcomes
+
+
+def _build_components(
+    *,
+    runtime: DisposableEvalRuntime,
+    run_id: str,
+    plans: Sequence[BusinessCasePlan],
+    recorder: ChatloopEvalRecorder,
+    versions: dict[str, str],
+) -> BusinessExecutor:
+    del plans
+    from app.services.openai_client import build_llm_service_from_env
+
+    calibration_path = os.getenv("CHATLOOP_JUDGE_CALIBRATION_PATH")
+    if not calibration_path:
+        raise RuntimeError(
+            "CHATLOOP_JUDGE_CALIBRATION_PATH is required before the business semantic judge can run"
+        )
+    gate = JudgeCalibrationGate.from_jsonl(
+        calibration_path,
+        expected_identity={
+            "judge_model": versions["model"],
+            "judge_prompt_sha256": SEMANTIC_JUDGE_PROMPT_SHA256,
+            "rubric_version": SEMANTIC_JUDGE_RUBRIC_VERSION,
+        },
+    )
+    gate.require_calibrated()
+    calibration_kappa = gate.result.cohen_kappa
+    if calibration_kappa is None:  # defensive: calibrated gates require a defined kappa
+        raise RuntimeError("business semantic judge calibration kappa is undefined")
+    llm = build_llm_service_from_env()
+    effective_versions = {
+        **versions,
+        "judge_calibration_sha256": sha256(Path(calibration_path).read_bytes()).hexdigest(),
+        "judge_calibration_samples": str(gate.result.sample_count),
+        "judge_calibration_kappa": f"{calibration_kappa:.6f}",
+        "judge_calibration_agreement": f"{gate.result.agreement:.6f}",
+        "judge_prompt_sha256": SEMANTIC_JUDGE_PROMPT_SHA256,
+        "judge_rubric_version": SEMANTIC_JUDGE_RUBRIC_VERSION,
+    }
+    manager = CaseEnvironmentManager(runtime)
+    runner = BusinessRunner(
+        manager,
+        direct_executor=DirectToolLoopBusinessExecutor(
+            runtime.async_session_factory,
+            sync_session_factory=runtime.sync_session_factory,
+            subprocess_env=runtime.subprocess_env,
+        ),
+        durable_executor=_UnavailableDurableExecutor(),
+    )
+    provider = BusinessStructuredEvidenceProvider(
+        versions=effective_versions,
+        semantic_judge=LLMSemanticEvidenceJudge(llm=llm, calibration_gate=gate),
+    )
+    artifact_root = Path(
+        os.getenv(
+            "CHATLOOP_EVAL_ARTIFACT_ROOT",
+            str(Path(__file__).resolve().parent / "results" / "business"),
+        )
+    )
+    catalog = _catalog_for_plans()
+    return BusinessPlanExecutor(
+        runner=runner,
+        evidence_provider=provider,
+        policy_registry=PolicyRegistry.default(),
+        artifact_store=ArtifactStore(artifact_root),
+        trial_recorder=recorder,
+        versions=effective_versions,
+        policy_as_of=catalog.policy_as_of,
+        run_id=run_id,
+        base_random_seed=int(os.getenv("CHATLOOP_EVAL_BASE_SEED", "20260728")),
+    )
+
+
+def _catalog_for_plans():
+    from eval.chatloop.case_loader import load_catalog
+
+    return load_catalog()
+
+
+def _versions() -> dict[str, str]:
+    from app.chatloop.system_prompt import CHAT_SYSTEM_PROMPT
+    from app.services.tier_router import V0_DEFAULT_MODEL
+
+    from eval.chatloop.case_loader import load_catalog
+
+    catalog = load_catalog()
+    return {
+        "case": catalog.manifest.catalog_version,
+        "policy": catalog.policy_version,
+        "evaluator": "business-eval-v1",
+        "model": V0_DEFAULT_MODEL,
+        "prompt_sha256": sha256(CHAT_SYSTEM_PROMPT.encode("utf-8")).hexdigest(),
+        "git_sha": _full_git_sha(),
+    }
+
+
+def _run_start(
+    run_id: str,
+    plans: Sequence[BusinessCasePlan],
+    versions: dict[str, str],
+) -> dict[str, Any]:
+    counts = {plan.trial_count for plan in plans}
+    return {
+        "run_id": run_id,
+        "created_at": now_iso(),
+        "git_sha": versions["git_sha"],
+        "mode": "business",
+        "dispatch": "real",
+        "sut_model": versions["model"],
+        "judge_model": versions["model"],
+        "simulator_model": None,
+        "k": next(iter(counts)) if len(counts) == 1 else None,
+        "max_steps": 6,
+        "max_turns": None,
+        "golden_file": str(_catalog_for_plans().root / "catalog.json"),
+        "case_count": len(plans),
+        "system_prompt_sha": versions["prompt_sha256"],
+        "thresholds_json": None,
+        "sampling_json": {
+            "sut": {"temperature": "provider-default", "seed_applied": False},
+            "judge": {"temperature": "provider-default", "seed_applied": False},
+        },
+        "duration_ms": None,
+        "cost_cny": None,
+        "total_tokens": None,
+        "status": "running",
+        "config_json": {
+            "case_ids": [plan.case.case_id for plan in plans],
+            "trial_counts": {plan.case.case_id: plan.trial_count for plan in plans},
+            "suite_types": {plan.case.case_id: plan.case.suite_type.value for plan in plans},
+            "case_version": versions["case"],
+            "policy_version": versions["policy"],
+            "evaluator_version": versions["evaluator"],
+        },
+    }
+
+
+def _finish(
+    recorder: Any,
+    run_id: str,
+    started: float,
+    *,
+    status: str,
+    config_patch: dict[str, Any],
+) -> None:
+    recorder.finish_run(
+        run_id,
+        status=status,
+        duration_ms=max(0, int((time.perf_counter() - started) * 1000)),
+        cost_cny=None,
+        total_tokens=None,
+        config_patch=config_patch,
+    )
+
+
+def _admin_dsn_from_env() -> str:
+    password = os.getenv("POSTGRES_PASSWORD")
+    if not password:
+        raise RuntimeError("POSTGRES_PASSWORD is required for disposable eval runtime")
+    return URL.create(
+        "postgresql",
+        username=os.getenv("POSTGRES_USER", "postgres"),
+        password=password,
+        host=os.getenv("POSTGRES_HOST", "localhost"),
+        port=int(os.getenv("POSTGRES_PORT", "5432")),
+        database=os.getenv("CHATLOOP_EVAL_ADMIN_DB", "postgres"),
+    ).render_as_string(hide_password=False)
+
+
+def _full_git_sha() -> str:
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+    except Exception:  # noqa: BLE001
+        return "unknown"
+
+
+def _error_text(error: BaseException) -> str:
+    return f"{type(error).__name__}: {error}"
+
+
+def _export_history() -> None:
+    from eval.chatloop.export_dashboard import export_history
+
+    export_history()
+
+
+__all__ = ["ProductionBusinessExecutor"]

@@ -21,6 +21,7 @@ from eval.chatloop.trial_evaluator import (
     TrialStatus,
     calculate_raw_score,
     evaluate_harness_failure,
+    evaluate_invalid_evidence,
     evaluate_trial,
     summarize_batch,
     task_pass,
@@ -152,6 +153,17 @@ def test_harness_failure_has_null_task_pass_and_invalidates_batch() -> None:
     assert trial.task_pass is None
     assert batch.release_eligible is False
     assert batch.valid_trial_rate == 0.0
+
+
+def test_invalid_evidence_helper_preserves_reason_and_nullable_result() -> None:
+    trial = evaluate_invalid_evidence("collector omitted database path")
+
+    assert trial.trial_status == TrialStatus.INVALID_EVIDENCE
+    assert trial.task_pass is None
+    assert trial.task_score is None
+    assert trial.raw_score is None
+    assert trial.failure_reason == "collector omitted database path"
+    assert trial.violations == ()
 
 
 def test_incomplete_required_evidence_beats_harness_failure(
@@ -1105,6 +1117,35 @@ def test_c0_c1_and_uncertain_judge_outcomes_raise_human_review_flags(
     )
 
     assert {flag.reason for flag in result.human_review_flags} == {"C0", "judge_uncertain"}
+
+
+def test_uncertain_semantic_evidence_is_a_failure_and_requires_review(
+    policy_registry: PolicyRegistry,
+) -> None:
+    case = make_case(
+        required_assertions=[
+            AssertionSpec(
+                assertion_id="semantic-rule",
+                source="evidence",
+                operator="equals",
+                path="semantic_rule",
+                expected=True,
+            )
+        ]
+    )
+    observation = base_observation()
+    observation["evidence"]["semantic_rule"] = "uncertain"
+
+    result = evaluate_trial(
+        case,
+        observation=observation,
+        policy_registry=policy_registry,
+        policy_as_of=date(2026, 7, 27),
+    )
+
+    assert result.trial_status == TrialStatus.VALID
+    assert result.task_pass is False
+    assert {flag.reason for flag in result.human_review_flags} == {"judge_uncertain"}
 
 
 def test_capability_batch_release_gate_depends_on_validity_not_task_success(

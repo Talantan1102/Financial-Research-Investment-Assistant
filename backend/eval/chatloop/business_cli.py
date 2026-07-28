@@ -280,11 +280,14 @@ def run_business_cli(
             BusinessCasePlan(case=case, trial_count=options.k or case.trial_count)
             for case in selected
         )
-        if deps.executor is None:
-            raise BusinessCliUsageError(
-                "business execution requires an injected safe disposable runtime"
-            )
-        outcomes: tuple[BusinessTrialOutcome, ...] = tuple(asyncio.run(deps.executor(plans)))
+        executor = deps.executor
+        if executor is None:
+            if dependencies is not None:
+                raise BusinessCliUsageError(
+                    "business execution requires an injected safe disposable runtime"
+                )
+            executor = _default_business_executor()
+        outcomes: tuple[BusinessTrialOutcome, ...] = tuple(asyncio.run(executor(plans)))
         summary = summarize_business_run(plans, outcomes)
         deps.output(_format_run_summary(summary))
         return BusinessCliResult(exit_code=business_exit_code(summary), summary=summary)
@@ -318,6 +321,13 @@ def _format_run_summary(summary: BusinessCliSummary) -> str:
         f"regression_failures={summary.regression_failures}, "
         f"invalid={summary.invalid_trials}"
     )
+
+
+def _default_business_executor() -> BusinessExecutor:
+    """Import the stateful runtime only after a validated execution selection."""
+    from eval.chatloop.business_runtime import ProductionBusinessExecutor
+
+    return ProductionBusinessExecutor()
 
 
 __all__ = [

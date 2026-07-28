@@ -10,7 +10,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from eval.chatloop import run_eval
+from eval.chatloop import business_cli, run_eval
 from eval.chatloop.business_cli import (
     BusinessCasePlan,
     BusinessCliDependencies,
@@ -280,6 +280,25 @@ def test_execution_without_disposable_runtime_fails_closed(mixed_catalog: CaseCa
 
     assert result.exit_code == 2
     assert "disposable runtime" in (result.error or "")
+
+
+def test_default_execution_runtime_is_built_lazily_only_for_real_execution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor = RecordingExecutor()
+    calls: list[str] = []
+
+    def build_default():
+        calls.append("built")
+        return executor
+
+    monkeypatch.setattr(business_cli, "_default_business_executor", build_default)
+
+    result = run_business_cli(["--business", "--case", "B1-01"])
+
+    assert result.exit_code == 0
+    assert calls == ["built"]
+    assert len(executor.calls) == 1
 
 
 def test_unknown_case_returns_two_without_running(mixed_catalog: CaseCatalog) -> None:

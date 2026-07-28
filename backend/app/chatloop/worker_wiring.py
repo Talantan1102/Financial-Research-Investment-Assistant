@@ -97,6 +97,7 @@ class HeavySingletons:
     skill_listing: str  # L1 元数据清单(进稳定前缀,会话内冻结)
     gate_cfg: GateConfig
     session_factory: Any = None  # async_sessionmaker —— get_portfolio_positions 查 positions 用
+    sync_session_factory: Any = None  # sync sessionmaker —— business writes/audits
     trace: Any = None  # TraceService —— ToolHub 写工具 span 用
 
 
@@ -126,6 +127,7 @@ async def build_heavy_singletons(
     *,
     session_factory: Any,
     mcp_client: Any,
+    sync_session_factory: Any | None = None,
     llm: Any | None = None,
     memory: Any | None = None,
     skills_root: Any | None = None,
@@ -202,7 +204,8 @@ async def build_heavy_singletons(
     from app.core.database import SessionLocal
     from app.services.trace_service import TraceService
 
-    trace = TraceService(SessionLocal)
+    selected_sync_factory = sync_session_factory or SessionLocal
+    trace = TraceService(selected_sync_factory)
 
     return HeavySingletons(
         llm=llm,
@@ -214,6 +217,7 @@ async def build_heavy_singletons(
         skill_listing=skill_listing,
         gate_cfg=GateConfig(),
         session_factory=session_factory,
+        sync_session_factory=selected_sync_factory,
         trace=trace,
     )
 
@@ -262,15 +266,14 @@ def build_turn_components(
         emit=emit,
         seq_counter=seq_counter,
         gate_cfg=singletons.gate_cfg,
-        audit_repo=SubagentAuditRepo(),
+        audit_repo=SubagentAuditRepo(singletons.sync_session_factory),
     )
 
     from app.chatloop.code_interpreter_tool import CodeInterpreterTool
-    from app.core.database import SessionLocal
     from app.skills.executor_backend import SkillExecutorBackend
 
-    paper_backend = SqlPaperTradingBackend(SessionLocal)
-    watchlist_backend = SqlWatchlistBackend(SessionLocal)
+    paper_backend = SqlPaperTradingBackend(singletons.sync_session_factory)
+    watchlist_backend = SqlWatchlistBackend(singletons.sync_session_factory)
     hub.register_inprocess(
         [
             MemorySearchTool(memory=singletons.memory),

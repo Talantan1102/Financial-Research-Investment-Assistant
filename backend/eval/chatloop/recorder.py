@@ -310,6 +310,28 @@ class ChatloopEvalRecorder:
             session.commit()
         return trial.trial_id
 
+    def finish_run(
+        self,
+        run_id: str,
+        *,
+        status: str,
+        duration_ms: int,
+        cost_cny: float | None,
+        total_tokens: int | None,
+        config_patch: dict[str, Any] | None = None,
+    ) -> None:
+        """Finalize one previously recorded run without discarding start metadata."""
+        with self._sf() as session:
+            row = session.get(ChatloopEvalRunRow, run_id)
+            if row is None:
+                raise ValueError(f"unknown eval run: {run_id}")
+            row.status = status
+            row.duration_ms = duration_ms
+            row.cost_cny = cost_cny
+            row.total_tokens = total_tokens
+            row.config_json = {**(row.config_json or {}), **(config_patch or {})}
+            session.commit()
+
 
 def new_run_id() -> str:
     return uuid4().hex[:16]

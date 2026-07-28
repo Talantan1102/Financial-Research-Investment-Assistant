@@ -29,6 +29,7 @@ class MCPClient:
         cls,
         server_module: str = "app.mcp_server.server",
         profile: str = "chat_tools",
+        env_overrides: dict[str, str] | None = None,
     ) -> AsyncIterator[MCPClient]:
         """Launch MCP server subprocess via stdio for the given profile.
 
@@ -39,6 +40,8 @@ class MCPClient:
         # Ensure subprocess can find app.* modules — backend/ must be in PYTHONPATH
         backend_path = Path(__file__).parent.parent.parent  # backend/
         env = os.environ.copy()
+        if env_overrides:
+            env.update(env_overrides)
         existing_pp = env.get("PYTHONPATH", "")
         env["PYTHONPATH"] = (
             f"{backend_path}{os.pathsep}{existing_pp}" if existing_pp else str(backend_path)

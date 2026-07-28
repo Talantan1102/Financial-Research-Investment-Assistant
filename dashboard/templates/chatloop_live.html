@@ -1,60 +1,197 @@
-{# 实时评估成绩单 — /eval/chatloop-live。数据源:dashboard/data/chatloop_eval_history.json
-   (backend eval.chatloop.export_dashboard 每次落库后刷新)。看板 PG-free,只读 JSON。 #}
+{# ChatLoop 实时评估成绩单。数据由 backend 导出为 JSON，页面不直连数据库。 #}
 {% extends "base.html" %}
 {% block nav %}{% include "_board_nav.html" %}{% endblock %}
 {% block content %}
 
 <style>
   .cl-trend { border-collapse: collapse; width: 100%; font-size: 0.85rem; margin-top: 0.5rem; }
-  .cl-trend th, .cl-trend td { border: 1px solid var(--rule, #d8d2c4); padding: 4px 8px; text-align: left; white-space: nowrap; }
+  .cl-trend th, .cl-trend td { border: 1px solid var(--rule, #d8d2c4); padding: 5px 8px; text-align: left; white-space: nowrap; }
   .cl-trend thead th { background: var(--surface-2, #efeae0); font-weight: 600; }
-  .cl-trend tbody tr:last-child td { font-weight: 600; }  /* 最新一行加粗 */
+  .cl-trend tbody tr:last-child td { font-weight: 600; }
   .cl-cfg code { font-size: 0.85em; }
+  .cl-kpis { display: grid; grid-template-columns: repeat(3, minmax(150px, 1fr)); gap: 12px; margin: 14px 0; }
+  .cl-kpi { border: 1px solid var(--rule, #d8d2c4); border-radius: 6px; padding: 12px; background: var(--surface-1, #faf8f3); }
+  .cl-kpi-label { color: var(--muted, #6d685e); font-size: 0.82rem; }
+  .cl-kpi-value { display: block; margin-top: 4px; font-size: 1.45rem; font-weight: 650; }
+  .cl-kpi-note { display: block; margin-top: 4px; color: var(--muted, #6d685e); font-size: 0.76rem; }
+  .cl-note { border-left: 3px solid #b7791f; padding: 8px 12px; background: #fff8e7; }
+  .cl-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(82px, 1fr)); gap: 8px; margin-top: 10px; }
+  .cl-chip { border: 1px solid var(--rule, #d8d2c4); border-radius: 5px; padding: 7px 8px; }
+  .cl-chip b { display: block; font-size: 1.05rem; }
+  .cl-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+  .cl-empty { color: var(--muted, #6d685e); }
+  .cl-link { overflow-wrap: anywhere; }
+  @media (max-width: 760px) {
+    .cl-kpis, .cl-columns { grid-template-columns: 1fr; }
+    .cl-trend-wrap { overflow-x: auto; }
+  }
 </style>
 
 <article class="report">
-  <a class="report-back" href="/eval">‹ 返回评估体系</a>
+  <a class="report-back" href="/eval">← 返回评估体系</a>
   <header class="report-head">
     <h1 class="report-title">Chat-Loop Agent 评估 · 实时成绩单</h1>
-    <p class="report-subtitle">从 <code>chatloop_eval_runs / _metrics</code> 落库数据直读;每次 run_eval 自动刷新。导出于 {{ sc.generated_at }}。方法论与诚实账见 <a href="/eval/report/chatloop-eval-scorecard">分析报告</a>。</p>
+    <p class="report-subtitle">读取评估导出文件；每次 run_eval 完成后自动刷新。导出时间 {{ sc.generated_at }}。方法说明见 <a href="/eval/report/chatloop-eval-scorecard">分析报告</a>。</p>
   </header>
 
   {% if not sc.runs %}
-    <p class="report-body">还没有评估跑记录。跑一次 <code>python -m eval.chatloop.run_eval --ci</code>(会自动落库 + 导出)后这里就有了。</p>
+    <p class="report-body">还没有评估记录。先运行一次 <code>python -m eval.chatloop.run_eval --ci</code>，完成落库和导出后这里就会显示结果。</p>
   {% else %}
   {% set L = sc.latest %}
   <section class="report-section cl-cfg">
-    <h3 class="report-h">最近一次跑 · 全套配置</h3>
+    <h3 class="report-h">最近一次运行 · 配置与成本</h3>
     <ul class="report-bullets">
-      <li>时间 {{ sc.short_time(L) }} · git <code>{{ L.git_sha }}</code> · 模式 <b>{{ L.mode }}{% if L.dispatch %}/{{ L.dispatch }}{% endif %}</b> · {{ L.case_count }} case · 状态 {{ L.status }}</li>
-      <li>SUT 模型 <code>{{ L.sut_model }}</code>{% if L.judge_model %} · 裁判 <code>{{ L.judge_model }}</code>{% endif %}{% if L.simulator_model %} · 模拟器 <code>{{ L.simulator_model }}</code>{% endif %}{% if L.k %} · k={{ L.k }}{% endif %}</li>
-      <li>采样:SUT {{ L.sampling_json.sut.temperature if L.sampling_json and L.sampling_json.sut else '—' }}{% if L.sampling_json and L.sampling_json.judge %} · 裁判 temp={{ L.sampling_json.judge.temperature }}{% endif %}{% if L.sampling_json and L.sampling_json.simulator %} · 模拟器 temp={{ L.sampling_json.simulator.temperature }}{% endif %}</li>
-      <li>耗时 <b>{{ L.duration_ms }}ms</b> · 成本 <b>¥{{ '%.4f'|format(L.cost_cny) if L.cost_cny is not none else '—' }}</b> / {{ L.total_tokens }} tok · prompt_sha <code>{{ L.system_prompt_sha }}</code></li>
-      {% if L.thresholds_json %}<li>阈值:{{ L.thresholds_json }}</li>{% endif %}
+      <li>时间 {{ sc.short_time(L) }} · git <code>{{ L.git_sha|default('—', true) }}</code> · 模式 <b>{{ L.mode|default('—', true) }}{% if L.dispatch %}/{{ L.dispatch }}{% endif %}</b> · {{ L.case_count|default(0, true) }} case · 状态 {{ L.status|default('—', true) }}</li>
+      <li>SUT 模型 <code>{{ L.sut_model|default('—', true) }}</code>{% if L.judge_model %} · 裁判 <code>{{ L.judge_model }}</code>{% endif %}{% if L.simulator_model %} · 模拟器 <code>{{ L.simulator_model }}</code>{% endif %}{% if L.k %} · k={{ L.k }}{% endif %}</li>
+      <li>采样：SUT {% if L.sampling_json and L.sampling_json.sut %}{{ L.sampling_json.sut.temperature }}{% else %}—{% endif %}{% if L.sampling_json and L.sampling_json.judge %} · 裁判 temp={{ L.sampling_json.judge.temperature }}{% endif %}{% if L.sampling_json and L.sampling_json.simulator %} · 模拟器 temp={{ L.sampling_json.simulator.temperature }}{% endif %}</li>
+      <li>耗时 <b>{{ L.duration_ms|default('—', true) }}ms</b> · 成本 <b>{% if L.cost_cny is defined and L.cost_cny is not none %}¥{{ '%.4f'|format(L.cost_cny) }}{% else %}—{% endif %}</b> / {{ L.total_tokens|default('—', true) }} tok · prompt_sha <code>{{ L.system_prompt_sha|default('—', true) }}</code></li>
+      {% if L.thresholds_json %}<li>阈值：{{ L.thresholds_json }}</li>{% endif %}
     </ul>
   </section>
 
+  {% if sc.business %}
+  {% set B = sc.business %}
   <section class="report-section">
-    <h3 class="report-h">历次趋势 · 共 {{ sc.runs|length }} 次跑(末行为最新)</h3>
-    <p class="report-body">每跑一次一行,看指标随 git 版本怎么变——这是"改了 prompt 有没有用"一眼可见的地方。</p>
-    <table class="cl-trend">
-      <thead>
-        <tr>
-          <th>时间</th><th>git</th><th>模式</th>
-          {% for k in sc.metric_keys %}<th>{{ sc.label(k) }}</th>{% endfor %}
-        </tr>
-      </thead>
-      <tbody>
-        {% for run in sc.runs %}
-        <tr>
-          <td>{{ sc.short_time(run) }}</td>
-          <td><code>{{ run.git_sha }}</code></td>
-          <td>{{ run.mode }}</td>
-          {% for k in sc.metric_keys %}<td>{{ sc.cell(run, k) }}</td>{% endfor %}
-        </tr>
+    <h3 class="report-h">业务能力评估</h3>
+    <div class="cl-kpis">
+      <div class="cl-kpi">
+        <span class="cl-kpi-label">有效试次率</span>
+        <b class="cl-kpi-value">{{ '%.1f%%'|format(B.valid_trial_rate * 100) }}</b>
+        <span class="cl-kpi-note">{{ B.valid_trials }} / {{ B.total_trials }}，只衡量评估证据是否有效</span>
+      </div>
+      <div class="cl-kpi">
+        <span class="cl-kpi-label">任务通过率</span>
+        <b class="cl-kpi-value">{{ '%.1f%%'|format(B.task_pass_rate * 100) }}</b>
+        <span class="cl-kpi-note">{{ B.task_passes }} / {{ B.valid_trials }} 个有效试次满足任务断言</span>
+      </div>
+      <div class="cl-kpi">
+        <span class="cl-kpi-label">诊断分</span>
+        <b class="cl-kpi-value">{% if B.diagnostic_score is not none %}{{ '%.1f'|format(B.diagnostic_score) }}{% else %}—{% endif %}</b>
+        <span class="cl-kpi-note">用于定位问题，不是 Capability 发布门槛</span>
+      </div>
+    </div>
+    {% if B.is_capability %}
+      <p class="cl-note"><b>Capability 批次固定不可发布。</b>不能按平均分判定 Capability 通过；发布资格只适用于满足严格条件的 Regression 批次。</p>
+    {% else %}
+      <p class="report-body">发布资格：<b>{{ '是' if B.release_eligible else '否' }}</b></p>
+    {% endif %}
+  </section>
+
+  <section class="report-section cl-columns">
+    <div>
+      <h3 class="report-h">违规分布</h3>
+      <div class="cl-grid">
+        {% for severity, count in B.violations.items() %}
+          <div class="cl-chip"><span>{{ severity }}</span><b>{{ count }}</b></div>
         {% endfor %}
-      </tbody>
-    </table>
+      </div>
+    </div>
+    <div>
+      <h3 class="report-h">环境覆盖</h3>
+      <div class="cl-grid">
+        {% for axis, count in B.environment_coverage.items() %}
+          <div class="cl-chip"><span>{{ axis }}</span><b>{{ count }}</b></div>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+
+  <section class="report-section">
+    <h3 class="report-h">任务组</h3>
+    <div class="cl-trend-wrap">
+      <table class="cl-trend">
+        <thead><tr><th>任务组</th><th>总试次</th><th>有效</th><th>通过</th></tr></thead>
+        <tbody>
+          {% for group, counts in B.task_groups.items() %}
+          <tr><td>{{ group }}</td><td>{{ counts.total }}</td><td>{{ counts.valid }}</td><td>{{ counts.passed }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="report-section cl-columns">
+    <div>
+      <h3 class="report-h">失败原因</h3>
+      {% if B.failure_reasons %}
+        <ul class="report-bullets">
+          {% for item in B.failure_reasons %}<li><code>{{ item.reason }}</code> · {{ item.count }}</li>{% endfor %}
+        </ul>
+      {% else %}<p class="cl-empty">没有记录失败原因。</p>{% endif %}
+    </div>
+    <div>
+      <h3 class="report-h">证据链接</h3>
+      {% if B.artifact_links %}
+        <ul class="report-bullets">
+          {% for item in B.artifact_links %}
+          <li>{{ item.case_id }} / {{ item.trial_id }} · {% if item.href %}<a class="cl-link" href="{{ item.href }}">{{ item.href }}</a>{% else %}<span class="cl-empty">无路径</span>{% endif %}</li>
+          {% endfor %}
+        </ul>
+      {% else %}<p class="cl-empty">没有导出证据链接。</p>{% endif %}
+    </div>
+  </section>
+
+  <section class="report-section">
+    <h3 class="report-h">待人工复核</h3>
+    <p class="report-body">强制复核范围包括 C0、C1 和 <code>judge_uncertain</code>。</p>
+    {% if B.human_review %}
+      <div class="cl-trend-wrap">
+        <table class="cl-trend">
+          <thead><tr><th>原因</th><th>Case</th><th>Trial</th><th>证据</th></tr></thead>
+          <tbody>
+            {% for item in B.human_review %}
+            <tr>
+              <td><b>{{ item.reason }}</b></td><td>{{ item.case_id }}</td><td>{{ item.trial_id }}</td>
+              <td>{% if item.href %}<a class="cl-link" href="{{ item.href }}">查看 artifact</a>{% else %}—{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}<p class="cl-empty">当前没有待复核项。</p>{% endif %}
+  </section>
+
+  {% if B.cases %}
+  <section class="report-section">
+    <h3 class="report-h">Case 可靠性</h3>
+    <div class="cl-trend-wrap">
+      <table class="cl-trend">
+        <thead><tr><th>Case</th><th>套件</th><th>k</th><th>有效</th><th>pass@1</th><th>pass^k</th><th>证据完整</th></tr></thead>
+        <tbody>
+          {% for item in B.cases %}
+          <tr>
+            <td>{{ item.case_id }}</td><td>{{ item.suite_type }}</td><td>{{ item.k }}</td>
+            <td>{{ item.valid_trials }}/{{ item.total_trials }}</td>
+            <td>{{ '%.1f%%'|format(item.pass_at_1 * 100) if item.pass_at_1 is not none else '—' }}</td>
+            <td>{% if item.pass_power_k is none %}—{% else %}{{ '是' if item.pass_power_k else '否' }}{% endif %}</td>
+            <td>{{ '是' if item.complete else '否' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% endif %}
+  {% endif %}
+
+  <section class="report-section">
+    <h3 class="report-h">历次趋势 · 共 {{ sc.runs|length }} 次运行</h3>
+    <p class="report-body">每次运行一行，保留 legacy 指标趋势兼容；末行是最新记录。</p>
+    <div class="cl-trend-wrap">
+      <table class="cl-trend">
+        <thead>
+          <tr><th>时间</th><th>git</th><th>模式</th>{% for key in sc.metric_keys %}<th>{{ sc.label(key) }}</th>{% endfor %}</tr>
+        </thead>
+        <tbody>
+          {% for run in sc.runs %}
+          <tr>
+            <td>{{ sc.short_time(run) }}</td><td><code>{{ run.git_sha }}</code></td><td>{{ run.mode }}</td>
+            {% for key in sc.metric_keys %}<td>{{ sc.cell(run, key) }}</td>{% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </section>
   {% endif %}
 </article>

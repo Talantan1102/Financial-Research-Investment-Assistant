@@ -24,6 +24,7 @@ from decimal import Decimal
 from typing import Any, Protocol
 from uuid import UUID, uuid4
 
+from eval.chatloop.environment import EvalActor
 from eval.chatloop.scenario import Scenario
 
 logger = logging.getLogger(__name__)
@@ -92,25 +93,64 @@ class DurableRunHttpTransport:
 
     _TERMINAL = frozenset({"completed", "failed", "cancelled"})
 
-    def __init__(self, session_factory: Any) -> None:
-        required = {
-            "base_url": os.getenv("CHATLOOP_EVAL_RUN_BASE_URL"),
-            "tenant_id": os.getenv("CHATLOOP_EVAL_TENANT_ID"),
-            "token": os.getenv("CHATLOOP_EVAL_AUTH_TOKEN"),
-            "user_id": os.getenv("CHATLOOP_EVAL_USER_ID"),
-        }
-        missing = [name for name, value in required.items() if not value]
-        if missing:
-            raise RuntimeError(
-                "outcome eval requires durable Run configuration: " + ", ".join(missing)
-            )
-        self._base_url = str(required["base_url"]).rstrip("/")
-        self._tenant_id = UUID(str(required["tenant_id"]))
-        self._token = str(required["token"])
-        self.user_id = str(UUID(str(required["user_id"])))
+    def __init__(
+        self,
+        session_factory: Any,
+        *,
+        actor: EvalActor | None = None,
+        tenant_id: UUID | str | None = None,
+        base_url: str | None = None,
+        timeout_s: float | None = None,
+        batch_id: str | None = None,
+    ) -> None:
+        if actor is None:
+            required = {
+                "base_url": base_url or os.getenv("CHATLOOP_EVAL_RUN_BASE_URL"),
+                "tenant_id": tenant_id or os.getenv("CHATLOOP_EVAL_TENANT_ID"),
+                "token": os.getenv("CHATLOOP_EVAL_AUTH_TOKEN"),
+                "user_id": os.getenv("CHATLOOP_EVAL_USER_ID"),
+            }
+            missing = [name for name, value in required.items() if not value]
+            if missing:
+                raise RuntimeError(
+                    "outcome eval requires durable Run configuration: " + ", ".join(missing)
+                )
+            configured_token = str(required["token"])
+            configured_user_id = UUID(str(required["user_id"]))
+            configured_tenant_id = UUID(str(required["tenant_id"]))
+            configured_base_url = str(required["base_url"])
+        else:
+            if not actor.is_authenticated or actor.user_id is None or actor.token is None:
+                raise ValueError("durable eval transport requires an authenticated actor")
+            selected_tenant = tenant_id if tenant_id is not None else actor.tenant_id
+            if selected_tenant is None:
+                raise ValueError("durable eval transport requires a tenant")
+            if actor.tenant_id is not None and UUID(str(selected_tenant)) != actor.tenant_id:
+                raise ValueError("durable eval actor does not belong to the selected tenant")
+            configured_token = str(actor.token)
+            configured_user_id = actor.user_id
+            configured_tenant_id = UUID(str(selected_tenant))
+            configured_base_url = str(base_url or os.getenv("CHATLOOP_EVAL_RUN_BASE_URL", "") or "")
+            if not configured_base_url:
+                raise ValueError("durable eval transport requires a Run API base URL")
+
+        self._base_url = configured_base_url.rstrip("/")
+        self._tenant_id = configured_tenant_id
+        self._token = configured_token
+        self.user_id = str(configured_user_id)
         self._session_factory = session_factory
-        self._timeout_s = float(os.getenv("CHATLOOP_EVAL_RUN_TIMEOUT_S", "60"))
-        self._batch_id = uuid4().hex
+        self._timeout_s = (
+            float(timeout_s)
+            if timeout_s is not None
+            else float(os.getenv("CHATLOOP_EVAL_RUN_TIMEOUT_S", "60"))
+        )
+        self._batch_id = batch_id or uuid4().hex
+        self._actor = actor
+
+    @property
+    def actor(self) -> EvalActor | None:
+        """Return the trial-scoped identity, if this is not legacy env construction."""
+        return self._actor
 
     @property
     def tenant_id(self) -> str:
@@ -157,6 +197,105 @@ class DurableRunHttpTransport:
             response_text=response_text,
             escalate_offered=False,
             run_state=run_state,
+        )
+
+    async def execute_messages(
+        self,
+        *,
+        case_id: str,
+        messages: list[str],
+        run_idx: int,
+        response_lost_after_commit: bool = False,
+    ) -> TransportObservation:
+        """Drive a business-case message script through real Run API boundaries."""
+        import httpx
+
+        if not messages:
+            raise ValueError("business case must contain at least one user message")
+        headers = {"Authorization": f"Bearer {self._token}"}
+        transcript: list[dict[str, str]] = []
+        all_calls: list[dict[str, Any]] = []
+        all_pauses: list[dict[str, Any]] = []
+        run_ids: list[str] = []
+        session_id: str | None = None
+        final_text = ""
+        final_status = "queued"
+        lost_injected = False
+        message_index = 0
+
+        async with httpx.AsyncClient(base_url=self._base_url, timeout=10) as client:
+            await self._preflight_identity(client, headers)
+            while message_index < len(messages):
+                prompt = messages[message_index]
+                transcript.append({"role": "user", "content": prompt})
+                body: dict[str, Any] = {"prompt": prompt}
+                if session_id is not None:
+                    body["session_id"] = session_id
+                created = await client.post(
+                    f"/api/v1/tenants/{self._tenant_id}/runs",
+                    headers={
+                        **headers,
+                        "Idempotency-Key": (
+                            f"eval:{self._batch_id}:{case_id}:{run_idx}:{message_index}"
+                        ),
+                    },
+                    json=body,
+                )
+                created.raise_for_status()
+                created_payload = created.json()
+                run_id = self._validated_created_run_id(created_payload)
+                session_id = str(UUID(str(created_payload["session_id"])))
+                run_ids.append(run_id)
+                message_index += 1
+                final_status, pause = await self._wait(run_id)
+
+                while pause is not None:
+                    if message_index >= len(messages):
+                        break
+                    reply = messages[message_index]
+                    transcript.append({"role": "user", "content": reply})
+                    if pause.pause_type == "input":
+                        resume_response: dict[str, Any] = {"text": reply}
+                    elif pause.pause_type == "approval":
+                        resume_response = {
+                            "approved": _approval_from_message(reply),
+                            "text": reply,
+                        }
+                    else:
+                        raise RuntimeError(f"unsupported business pause type {pause.pause_type}")
+                    resumed = await client.post(
+                        f"/api/v1/tenants/{self._tenant_id}/runs/{run_id}/resume",
+                        headers=headers,
+                        json={"pause_id": str(pause.id), "response": resume_response},
+                    )
+                    resumed.raise_for_status()
+                    message_index += 1
+                    if response_lost_after_commit and not lost_injected:
+                        lost_injected = True
+                    final_status, pause = await self._wait(run_id)
+
+                calls, state, response_text = await self._read_trace(run_id)
+                all_calls.extend(calls)
+                all_pauses.extend(state.get("pauses", []))
+                final_text = response_text
+                if response_text:
+                    transcript.append({"role": "assistant", "content": response_text})
+                if pause is not None or _is_terminal_script_response(response_text):
+                    break
+
+        return TransportObservation(
+            run_id=run_ids[-1],
+            tool_calls=all_calls,
+            response_text=final_text,
+            escalate_offered=False,
+            run_state={
+                "status": final_status,
+                "run_ids": run_ids,
+                "pauses": all_pauses,
+                "transcript": transcript,
+                "response_lost_after_commit_injected": lost_injected,
+                "observation": {"version": 1, "status": "collected"},
+            },
         )
 
     async def _preflight_identity(
@@ -412,8 +551,9 @@ class DurableRunHttpTransport:
 class SqlOutcomeCollector:
     """Capture user-owned paper/watchlist terminal facts around a durable Run."""
 
-    def __init__(self, session_factory: Any) -> None:
+    def __init__(self, session_factory: Any, *, actor: EvalActor | None = None) -> None:
         self._session_factory = session_factory
+        self._actor = actor
         self._batch_id = uuid4().hex
         self._active_lock: tuple[int, Any] | None = None
 
@@ -478,12 +618,16 @@ class SqlOutcomeCollector:
         scenario: Scenario,
         sample_key: str,
     ) -> None:
-        configured = os.getenv("CHATLOOP_EVAL_USER_ID")
-        if configured is None:
-            raise RuntimeError("CHATLOOP_EVAL_USER_ID is required for stateful eval setup")
         uid = UUID(user_id)
-        if uid != UUID(configured) or uid != UUID(_EVAL_USER_ID):
-            raise RuntimeError("stateful eval setup is restricted to the dedicated eval user")
+        if self._actor is not None:
+            if self._actor.user_id is None or uid != self._actor.user_id:
+                raise RuntimeError("stateful eval setup is restricted to the trial actor")
+        else:
+            configured = os.getenv("CHATLOOP_EVAL_USER_ID")
+            if configured is None:
+                raise RuntimeError("CHATLOOP_EVAL_USER_ID is required for stateful eval setup")
+            if uid != UUID(configured) or uid != UUID(_EVAL_USER_ID):
+                raise RuntimeError("stateful eval setup is restricted to the dedicated eval user")
         async with self._session_factory() as session, session.begin():
             await session.run_sync(
                 lambda sync_session: self._prepare_sync(
@@ -747,7 +891,10 @@ async def run_scenarios(
         ordinary_scenarios = [scenario for scenario in scenarios if scenario.outcome is None]
         if outcome_scenarios:
             transport = outcome_transport or DurableRunHttpTransport(session_factory)
-            collector = outcome_collector or SqlOutcomeCollector(session_factory)
+            collector = outcome_collector or SqlOutcomeCollector(
+                session_factory,
+                actor=getattr(transport, "actor", None),
+            )
             for scenario in outcome_scenarios:
                 for run_idx in range(k):
                     try:
@@ -887,6 +1034,22 @@ async def run_scenarios(
         await engine.dispose()
 
     return results
+
+
+def _approval_from_message(message: str) -> bool:
+    normalized = "".join(message.lower().split())
+    negative = ("取消", "算了", "不确认", "不同意", "拒绝", "终止", "不要")
+    positive = ("确认", "同意", "批准", "继续", "可以", "好的", "好", "是")
+    if any(token in normalized for token in negative):
+        return False
+    if any(token in normalized for token in positive):
+        return True
+    raise RuntimeError("approval pause received an ambiguous scripted user message")
+
+
+def _is_terminal_script_response(response_text: str) -> bool:
+    normalized = response_text.lower()
+    return "action_required" in normalized or "需要您先完成" in response_text
 
 
 __all__ = [

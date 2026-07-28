@@ -33,6 +33,7 @@ __all__ = [
     "TrialStatus",
     "calculate_raw_score",
     "evaluate_harness_failure",
+    "evaluate_invalid_evidence",
     "evaluate_trial",
     "summarize_batch",
     "task_pass",
@@ -99,6 +100,23 @@ def task_pass(required: Sequence[AssertionResult], trial_status: TrialStatus) ->
 def evaluate_harness_failure(reason: str) -> TrialEvaluation:
     return TrialEvaluation(
         trial_status=TrialStatus.HARNESS_FAILED,
+        task_pass=None,
+        task_score=None,
+        raw_score=None,
+        failure_reason=reason,
+        required_results=(),
+        forbidden_results=(),
+        expected_state_change_results=(),
+        acceptable_outcome_results=(),
+        selected_acceptable_outcome=None,
+        violations=(),
+        human_review_flags=(),
+    )
+
+
+def evaluate_invalid_evidence(reason: str) -> TrialEvaluation:
+    return TrialEvaluation(
+        trial_status=TrialStatus.INVALID_EVIDENCE,
         task_pass=None,
         task_score=None,
         raw_score=None,
@@ -513,7 +531,7 @@ def _human_review_flags(
         expected_results,
         passing_acceptable_results,
     ):
-        if result.source != "judge" or not isinstance(result.actual, str):
+        if not isinstance(result.actual, str):
             continue
         if result.actual in {"uncertain", "无法判断"}:
             flags[("judge_uncertain", result.assertion_id, None)] = HumanReviewFlag(
