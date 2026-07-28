@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from decimal import Decimal
@@ -89,7 +90,13 @@ class OutcomeCollector(Protocol):
 
 
 class DurableRunHttpTransport:
-    """Drive the real Run API and read its durable RunPause/tool ledger."""
+    """Drive the real Run API and read its durable RunPause/tool ledger.
+
+    A progress callback is trusted evaluator code and must be cancellation-
+    cooperative: after receiving ``CancelledError`` it may perform bounded
+    cleanup, then it must finish or re-raise. Python cannot forcibly terminate
+    a coroutine that suppresses cancellation forever.
+    """
 
     _TERMINAL = frozenset({"completed", "failed", "cancelled"})
 
@@ -102,6 +109,8 @@ class DurableRunHttpTransport:
         base_url: str | None = None,
         timeout_s: float | None = None,
         batch_id: str | None = None,
+        client_transport: Any | None = None,
+        progress_callback: Callable[[], Awaitable[Any]] | None = None,
     ) -> None:
         if actor is None:
             required = {
@@ -131,8 +140,10 @@ class DurableRunHttpTransport:
             configured_user_id = actor.user_id
             configured_tenant_id = UUID(str(selected_tenant))
             configured_base_url = str(base_url or os.getenv("CHATLOOP_EVAL_RUN_BASE_URL", "") or "")
-            if not configured_base_url:
+            if not configured_base_url and client_transport is None:
                 raise ValueError("durable eval transport requires a Run API base URL")
+            if not configured_base_url:
+                configured_base_url = "http://run-api"
 
         self._base_url = configured_base_url.rstrip("/")
         self._tenant_id = configured_tenant_id
@@ -146,6 +157,8 @@ class DurableRunHttpTransport:
         )
         self._batch_id = batch_id or uuid4().hex
         self._actor = actor
+        self._client_transport = client_transport
+        self._progress_callback = progress_callback
 
     @property
     def actor(self) -> EvalActor | None:
@@ -163,7 +176,11 @@ class DurableRunHttpTransport:
             "Authorization": f"Bearer {self._token}",
             "Idempotency-Key": f"eval:{self._batch_id}:{scenario.case_id}:{run_idx}",
         }
-        async with httpx.AsyncClient(base_url=self._base_url, timeout=10) as client:
+        async with httpx.AsyncClient(
+            base_url=self._base_url,
+            timeout=10,
+            transport=self._client_transport,
+        ) as client:
             await self._preflight_identity(client, headers)
             response = await client.post(
                 f"/api/v1/tenants/{self._tenant_id}/runs",
@@ -223,7 +240,11 @@ class DurableRunHttpTransport:
         lost_injected = False
         message_index = 0
 
-        async with httpx.AsyncClient(base_url=self._base_url, timeout=10) as client:
+        async with httpx.AsyncClient(
+            base_url=self._base_url,
+            timeout=10,
+            transport=self._client_transport,
+        ) as client:
             await self._preflight_identity(client, headers)
             while message_index < len(messages):
                 prompt = messages[message_index]
@@ -383,7 +404,22 @@ class DurableRunHttpTransport:
                 )
                 if status in self._TERMINAL or pause is not None:
                     return status, pause
-            await asyncio.sleep(0.1)
+            if self._progress_callback is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                try:
+                    await asyncio.wait_for(
+                        self._progress_callback(),
+                        timeout=remaining,
+                    )
+                except TimeoutError as exc:
+                    raise TimeoutError(
+                        f"eval Run {run_id} progress callback exceeded remaining timeout"
+                    ) from exc
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                await asyncio.sleep(min(0.1, remaining))
         raise TimeoutError(f"eval Run {run_id} did not reach pause/terminal state")
 
     @staticmethod

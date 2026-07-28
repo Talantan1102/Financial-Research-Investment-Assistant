@@ -12,6 +12,7 @@ from eval.chatloop.business_cli import BusinessCasePlan, BusinessTrialOutcome
 from eval.chatloop.business_runtime import ProductionBusinessExecutor
 from eval.chatloop.case_loader import load_catalog
 from eval.chatloop.case_schema import AcceptableOutcome, AssertionSpec
+from eval.chatloop.disposable_runtime import RuntimeCleanupError
 
 
 class FakeRuntime:
@@ -335,6 +336,87 @@ async def test_cleanup_failure_is_loud_and_run_is_marked_runtime_leaked() -> Non
         await executor([_plan()])
 
     assert recorder.finishes[0]["status"] == "runtime_leaked"
+
+
+@pytest.mark.asyncio
+async def test_cleanup_failure_after_confirmed_drop_is_not_marked_runtime_leaked() -> None:
+    cleanup_error = RuntimeCleanupError(
+        database_name="fria_eval_fake",
+        database_leaked=False,
+        failures=(("durable_driver", OSError("worker offline failed")),),
+    )
+    runtime = FakeRuntime(cleanup_error=cleanup_error)
+    recorder = FakeRecorder()
+    outcome = BusinessTrialOutcome("B1-01", 0, "valid", True)
+    executor = ProductionBusinessExecutor(
+        admin_dsn_factory=lambda: "postgresql://admin/postgres",
+        runtime_factory=lambda **_kwargs: runtime,
+        recorder_factory=lambda: recorder,
+        component_builder=lambda **_kwargs: FakePlanExecutor([outcome]),
+        run_id_factory=lambda: "run-business-cleanup-removed",
+    )
+
+    with pytest.raises(RuntimeCleanupError, match="worker offline failed"):
+        await executor([_plan()])
+
+    assert recorder.finishes[0]["status"] == "cleanup_failed"
+
+
+@pytest.mark.asyncio
+async def test_execution_failure_with_confirmed_drop_stays_harness_failed() -> None:
+    cleanup_error = RuntimeCleanupError(
+        database_name="fria_eval_fake",
+        database_leaked=False,
+        failures=(("async_engine", OSError("dispose failed")),),
+    )
+    runtime = FakeRuntime(cleanup_error=cleanup_error)
+    recorder = FakeRecorder()
+    executor = ProductionBusinessExecutor(
+        admin_dsn_factory=lambda: "postgresql://admin/postgres",
+        runtime_factory=lambda **_kwargs: runtime,
+        recorder_factory=lambda: recorder,
+        component_builder=lambda **_kwargs: FakePlanExecutor(error=RuntimeError("boom")),
+        run_id_factory=lambda: "run-business-failed-cleanup-removed",
+    )
+
+    with pytest.raises(RuntimeCleanupError, match="dispose failed"):
+        await executor([_plan()])
+
+    assert recorder.finishes[0]["status"] == "harness_failed"
+    assert recorder.finishes[0]["config_patch"]["failure"] == "RuntimeError: boom"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("database_leaked", "expected_status"),
+    [(True, "runtime_leaked"), (False, "harness_failed")],
+)
+async def test_runtime_factory_cleanup_error_uses_proven_leak_state(
+    database_leaked: bool,
+    expected_status: str,
+) -> None:
+    recorder = FakeRecorder()
+    factory_error = RuntimeCleanupError(
+        database_name="fria_eval_factory",
+        database_leaked=database_leaked,
+        failures=(("drop_database", OSError("factory cleanup failed")),),
+    )
+
+    def fail_runtime_factory(**_kwargs: Any) -> Any:
+        raise factory_error
+
+    executor = ProductionBusinessExecutor(
+        admin_dsn_factory=lambda: "postgresql://admin/postgres",
+        runtime_factory=fail_runtime_factory,
+        recorder_factory=lambda: recorder,
+        component_builder=lambda **_kwargs: FakePlanExecutor(),
+        run_id_factory=lambda: f"run-factory-cleanup-{database_leaked}",
+    )
+
+    with pytest.raises(RuntimeCleanupError, match="factory cleanup failed"):
+        await executor([_plan()])
+
+    assert recorder.finishes[0]["status"] == expected_status
 
 
 @pytest.mark.asyncio

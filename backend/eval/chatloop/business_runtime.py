@@ -25,7 +25,7 @@ from eval.chatloop.business_runner import (
     BusinessRunner,
     DirectToolLoopBusinessExecutor,
 )
-from eval.chatloop.disposable_runtime import DisposableEvalRuntime
+from eval.chatloop.disposable_runtime import DisposableEvalRuntime, RuntimeCleanupError
 from eval.chatloop.environment import CaseEnvironmentManager
 from eval.chatloop.judge_calibration import JudgeCalibrationGate
 from eval.chatloop.policy_registry import PolicyRegistry
@@ -105,7 +105,10 @@ class ProductionBusinessExecutor:
                         recorder,
                         run_id,
                         started,
-                        status="runtime_leaked",
+                        status=_cleanup_failure_status(
+                            cleanup_error,
+                            execution_failed=True,
+                        ),
                         config_patch={
                             "failure": _error_text(execution_error),
                             "cleanup_failure": _error_text(cleanup_error),
@@ -116,7 +119,11 @@ class ProductionBusinessExecutor:
                 recorder,
                 run_id,
                 started,
-                status="harness_failed",
+                status=(
+                    _cleanup_failure_status(execution_error, execution_failed=True)
+                    if isinstance(execution_error, RuntimeCleanupError)
+                    else "harness_failed"
+                ),
                 config_patch={"failure": _error_text(execution_error)},
             )
             raise
@@ -128,7 +135,7 @@ class ProductionBusinessExecutor:
                 recorder,
                 run_id,
                 started,
-                status="runtime_leaked",
+                status=_cleanup_failure_status(cleanup_error),
                 config_patch={"cleanup_failure": _error_text(cleanup_error)},
             )
             raise
@@ -168,6 +175,16 @@ class ProductionBusinessExecutor:
             )
             raise
         return outcomes
+
+
+def _cleanup_failure_status(
+    error: BaseException,
+    *,
+    execution_failed: bool = False,
+) -> str:
+    if isinstance(error, RuntimeCleanupError) and not error.database_leaked:
+        return "harness_failed" if execution_failed else "cleanup_failed"
+    return "runtime_leaked"
 
 
 def _build_components(

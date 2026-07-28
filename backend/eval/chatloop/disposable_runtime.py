@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from dataclasses import dataclass
 from enum import StrEnum
 from hashlib import sha256
 from typing import Any
@@ -26,16 +27,44 @@ class RuntimeState(StrEnum):
     LEAKED = "leaked"
 
 
+@dataclass(frozen=True)
+class RuntimeCleanupFailure:
+    """One failed cleanup stage retained for audit and diagnosis."""
+
+    stage: str
+    error: BaseException
+
+
 class RuntimeCleanupError(RuntimeError):
-    """The disposable database could not be proven absent after cleanup."""
+    """One or more cleanup stages failed, with explicit database leak status."""
+
+    def __init__(
+        self,
+        *,
+        database_name: str,
+        database_leaked: bool,
+        failures: tuple[tuple[str, BaseException], ...],
+    ) -> None:
+        if not failures:
+            raise ValueError("runtime cleanup error requires at least one failure")
+        self.database_name = database_name
+        self.database_leaked = database_leaked
+        self.failures = tuple(RuntimeCleanupFailure(stage, error) for stage, error in failures)
+        state = "database leak not excluded" if database_leaked else "database removed"
+        details = "; ".join(
+            f"{failure.stage}: {type(failure.error).__name__}: {failure.error}"
+            for failure in self.failures
+        )
+        super().__init__(f"runtime cleanup incomplete ({state}): {details}")
 
 
 class DisposableEvalRuntime:
     """Own one run-scoped database and expose only factories bound to it.
 
     PostgreSQL is physically isolated. AGE data is therefore removed with the
-    database. Milvus and the durable API/worker process are not yet namespaced;
-    callers must request those capabilities and fail closed before seeding.
+    database. Milvus is not yet namespaced. Durable cases are admitted only
+    while an evaluator-owned in-process driver is bound to this exact async
+    session factory; otherwise capability preflight fails before seeding.
     """
 
     def __init__(self, *, admin_dsn: str, run_id: str, database_name: str) -> None:
@@ -47,6 +76,7 @@ class DisposableEvalRuntime:
         self._async_engine: Any | None = None
         self._sync_session_factory: sessionmaker[Session] | None = None
         self._async_session_factory: async_sessionmaker[AsyncSession] | None = None
+        self._durable_driver: Any | None = None
 
     @classmethod
     def provision(cls, *, admin_dsn: str, run_id: str) -> DisposableEvalRuntime:
@@ -68,7 +98,9 @@ class DisposableEvalRuntime:
             except Exception as cleanup_error:
                 runtime.state = RuntimeState.LEAKED
                 raise RuntimeCleanupError(
-                    f"provisioning failed and database leaked: {database_name}"
+                    database_name=database_name,
+                    database_leaked=True,
+                    failures=(("drop_database", cleanup_error),),
                 ) from cleanup_error
             raise
         runtime.state = RuntimeState.READY
@@ -111,9 +143,29 @@ class DisposableEvalRuntime:
                 "memory isolation is unavailable: a run-scoped Milvus collection is required"
             )
         if durable:
-            raise RuntimeError(
-                "durable stack isolation is unavailable: API and worker runtime binding is required"
-            )
+            driver = self._durable_driver
+            if (
+                driver is None
+                or not driver.is_open
+                or driver.session_factory is not self.async_session_factory
+            ):
+                raise RuntimeError(
+                    "durable stack isolation is unavailable: "
+                    "API and worker runtime binding is required"
+                )
+
+    def bind_durable_driver(self, driver: Any) -> None:
+        """Bind only the evaluator-owned driver using this runtime's factory."""
+        from eval.chatloop.durable_runtime import InProcessDurableDriver
+
+        self._require_ready()
+        if not isinstance(driver, InProcessDurableDriver):
+            raise TypeError("durable binding requires an InProcessDurableDriver")
+        if driver.session_factory is not self.async_session_factory:
+            raise ValueError("durable driver is not bound to this disposable runtime")
+        if not driver.is_open:
+            raise ValueError("durable driver is already closed")
+        self._durable_driver = driver
 
     async def aclose(self) -> None:
         if self.state is RuntimeState.CLOSED:
@@ -121,18 +173,48 @@ class DisposableEvalRuntime:
         if self.state is RuntimeState.CLOSING:
             raise RuntimeError("runtime cleanup is already in progress")
         self.state = RuntimeState.CLOSING
-        try:
-            if self._async_engine is not None:
+        failures: list[tuple[str, BaseException]] = []
+        if self._durable_driver is not None and self._durable_driver.is_open:
+            try:
+                await self._durable_driver.aclose()
+            except BaseException as exc:
+                failures.append(("durable_driver", exc))
+        if self._async_engine is not None:
+            try:
                 await self._async_engine.dispose()
-            if self._sync_engine is not None:
+            except BaseException as exc:
+                failures.append(("async_engine", exc))
+        if self._sync_engine is not None:
+            try:
                 self._sync_engine.dispose()
+            except BaseException as exc:
+                failures.append(("sync_engine", exc))
+        database_removed = False
+        try:
             self._drop_database()
-        except Exception as exc:
-            self.state = RuntimeState.LEAKED
-            raise RuntimeCleanupError(
-                f"could not prove disposable database was removed: {self.database_name}"
-            ) from exc
-        self.state = RuntimeState.CLOSED
+            database_removed = True
+        except BaseException as exc:
+            failures.append(("drop_database", exc))
+        self.state = RuntimeState.CLOSED if database_removed else RuntimeState.LEAKED
+        cancellation = next(
+            (error for _stage, error in failures if isinstance(error, asyncio.CancelledError)),
+            None,
+        )
+        if database_removed and cancellation is not None:
+            for stage, failure in failures:
+                if failure is cancellation:
+                    continue
+                cancellation.add_note(
+                    f"additional cleanup failure at {stage}: {type(failure).__name__}: {failure}"
+                )
+            raise cancellation
+        if failures:
+            error = RuntimeCleanupError(
+                database_name=self.database_name,
+                database_leaked=not database_removed,
+                failures=tuple(failures),
+            )
+            raise error from failures[-1][1]
 
     def close(self) -> None:
         if self.state is RuntimeState.CLOSED:
@@ -231,5 +313,6 @@ def _database_name(run_id: str) -> str:
 __all__ = [
     "DisposableEvalRuntime",
     "RuntimeCleanupError",
+    "RuntimeCleanupFailure",
     "RuntimeState",
 ]
