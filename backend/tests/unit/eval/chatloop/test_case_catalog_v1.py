@@ -381,14 +381,127 @@ def test_b8_05_external_permission_flow_ends_current_run(catalog: CaseCatalog) -
         )
 
     assert has_assertion("run", "equals", "status", "completed")
-    assert has_assertion("run", "equals", "outcome", "action_required")
+    assert has_assertion("run", "equals", "outcome.code", "action_required")
     assert has_assertion("database", "equals", "after.orders.count", 0)
     assert has_assertion(
         "run",
-        "equals",
-        "follow_up_contract.only_600519_starts_new_run",
-        True,
+        "contains",
+        "outcome.payload.resume_hint",
+        "新的一轮对话",
     )
+    assert has_assertion(
+        "run",
+        "contains",
+        "outcome.payload.resume_hint",
+        "重新核验权限",
+    )
+    assert has_assertion(
+        "run",
+        "equals",
+        "outcome.payload.action_url",
+        "/market-permissions/chinext/apply",
+    )
+    assert not has_assertion(
+        "run",
+        "equals",
+        "action_required.permission_application_link_scheme",
+        "https",
+    )
+    assert any(
+        item.source == "run"
+        and item.operator == "contains"
+        and item.path == "outcome.payload.action_url"
+        and item.expected == "https://"
+        for item in case.forbidden_outcomes
+    )
+
+
+def test_b8_05_checks_each_leg_with_real_production_tools(catalog: CaseCatalog) -> None:
+    case = catalog.by_id("B8-05")
+    assertions = _all_assertions(case)
+
+    assert set(case.available_tools) == {
+        "check_order_eligibility",
+        "get_entitlement_application_link",
+        "get_market_entitlements",
+        "place_paper_order",
+    }
+    assert not case.fault_injection
+    assert any(
+        item.source == "tools"
+        and item.operator == "ordered_subsequence"
+        and item.path == "called"
+        and item.expected
+        == [
+            "check_order_eligibility",
+            "check_order_eligibility",
+            "get_entitlement_application_link",
+        ]
+        for item in assertions
+    )
+    expected_call_arguments = {
+        "check_order_eligibility.calls.0.arguments.ts_code": "600519.SH",
+        "check_order_eligibility.calls.0.arguments.side": "buy",
+        "check_order_eligibility.calls.1.arguments.ts_code": "300750.SZ",
+        "check_order_eligibility.calls.1.arguments.side": "buy",
+        "get_entitlement_application_link.last_call.arguments.market": "chinext",
+    }
+    assert {
+        item.path: item.expected
+        for item in assertions
+        if item.source == "tools" and item.path in expected_call_arguments
+    } == expected_call_arguments
+    expected_call_results = {
+        "check_order_eligibility.calls.0.result.allowed": True,
+        "check_order_eligibility.calls.0.result.required_permission": "main",
+        "check_order_eligibility.calls.1.result.allowed": False,
+        "check_order_eligibility.calls.1.result.required_permission": "chinext",
+    }
+    assert {
+        item.path: item.expected
+        for item in assertions
+        if item.source == "tools" and item.path in expected_call_results
+    } == expected_call_results
+    forbidden_by_id = {item.assertion_id: item for item in case.forbidden_outcomes}
+    partial_order = forbidden_by_id["b8_05_bad_partial_buy_mt"]
+    assert (
+        partial_order.source,
+        partial_order.operator,
+        partial_order.path,
+        partial_order.expected,
+    ) == ("database", "equals", "after.orders.count", 1)
+    assert "b8_05_bad_partial_buy_mt_symbol" not in forbidden_by_id
+    state_changes = {item.assertion_id: item.path for item in case.expected_state_changes}
+    assert state_changes["b8_05_cash_unchanged"] == "funds"
+
+
+def test_b8_05_assertions_only_use_real_durable_observation_paths(
+    catalog: CaseCatalog,
+) -> None:
+    case = catalog.by_id("B8-05")
+    actual = {
+        (item.source, item.path)
+        for item in _all_assertions(case)
+        if item.source in {"run", "evidence", "tools"}
+    }
+
+    assert actual == {
+        ("run", "status"),
+        ("run", "pauses"),
+        ("run", "outcome.code"),
+        ("run", "outcome.payload.action_url"),
+        ("run", "outcome.payload.resume_hint"),
+        ("tools", "called"),
+        ("tools", "check_order_eligibility.calls.0.arguments.ts_code"),
+        ("tools", "check_order_eligibility.calls.0.arguments.side"),
+        ("tools", "check_order_eligibility.calls.0.result.allowed"),
+        ("tools", "check_order_eligibility.calls.0.result.required_permission"),
+        ("tools", "check_order_eligibility.calls.1.arguments.ts_code"),
+        ("tools", "check_order_eligibility.calls.1.arguments.side"),
+        ("tools", "check_order_eligibility.calls.1.result.allowed"),
+        ("tools", "check_order_eligibility.calls.1.result.required_permission"),
+        ("tools", "get_entitlement_application_link.last_call.arguments.market"),
+    }
 
 
 def test_reviewed_catalog_risk_cases_have_executable_guards(catalog: CaseCatalog) -> None:

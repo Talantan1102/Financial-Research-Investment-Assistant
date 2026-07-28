@@ -13,6 +13,7 @@ from app.models.investor_suitability import (
     MarketEntitlement,
 )
 from app.models.paper_account import PaperAccount
+from app.models.paper_order import PaperOrder
 from app.models.run import Run, RunEvent, RunMessage, RunSession
 from app.models.run_scheduling import RunOutbox, RunTenantScheduling
 from app.models.user import User
@@ -480,6 +481,8 @@ async def test_partial_order_seed_uses_real_settlement_and_fee_reservation(
 
     assert snapshot["orders"]["latest"]["status"] == "partially_filled"
     assert snapshot["orders"]["latest"]["filled_quantity"] == 300
+    assert snapshot["orders"]["latest"]["source_run_id"]
+    assert snapshot["orders"]["latest"]["source_tool_call_id"].startswith("eval-seed-")
     assert snapshot["fills"]["count"] == 1
     assert snapshot["fills"]["records"][0]["price"] == "11.18"
     assert snapshot["funds"]["frozen_cash"] == "7840.08"
@@ -489,6 +492,7 @@ async def test_partial_order_seed_uses_real_settlement_and_fee_reservation(
     assert len(env.manifest.market_entitlement_ids) == 1
     assert len(env.manifest.market_access_rule_ids) == 1
     async with disposable_eval_async_session_factory() as session:
+        order = await session.get(PaperOrder, UUID(snapshot["orders"]["latest"]["id"]))
         entitlement = await session.get(
             MarketEntitlement,
             UUID(env.manifest.market_entitlement_ids[0]),
@@ -498,6 +502,9 @@ async def test_partial_order_seed_uses_real_settlement_and_fee_reservation(
             UUID(env.manifest.market_access_rule_ids[0]),
         )
     assert entitlement is not None
+    assert order is not None
+    assert snapshot["orders"]["latest"]["source_run_id"] == str(order.source_run_id)
+    assert snapshot["orders"]["latest"]["source_tool_call_id"] == order.source_tool_call_id
     assert entitlement.market is Market.MAIN
     assert entitlement.status is EntitlementStatus.ENABLED
     assert entitlement.can_buy is True

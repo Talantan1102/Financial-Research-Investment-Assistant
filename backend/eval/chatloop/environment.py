@@ -364,6 +364,10 @@ class TrialEnvironment:
                 "filled_quantity": row.filled_quantity,
                 "limit_price": _optional_money(row.limit_price),
                 "status": str(row.status),
+                "source_run_id": (
+                    str(row.source_run_id) if row.source_run_id is not None else None
+                ),
+                "source_tool_call_id": row.source_tool_call_id,
             }
             for row in orders
         ]

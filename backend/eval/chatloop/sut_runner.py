@@ -244,6 +244,7 @@ class DurableRunHttpTransport:
         session_id: str | None = None
         final_text = ""
         final_status = "queued"
+        final_outcome: dict[str, Any] | None = None
         total_tokens = 0
         cost_cny = Decimal("0")
         lost_injected = False
@@ -309,12 +310,20 @@ class DurableRunHttpTransport:
                 )
                 all_calls.extend(calls)
                 all_pauses.extend(state.get("pauses", []))
+                final_outcome = state.get("outcome")
                 total_tokens += run_tokens
                 cost_cny += Decimal(str(run_cost_cny))
                 final_text = response_text
                 if response_text:
                     transcript.append({"role": "assistant", "content": response_text})
-                if pause is not None or _is_terminal_script_response(response_text):
+                outcome_code = (
+                    final_outcome.get("code") if isinstance(final_outcome, dict) else None
+                )
+                if (
+                    pause is not None
+                    or outcome_code == "action_required"
+                    or _is_terminal_script_response(response_text)
+                ):
                     break
 
         return TransportObservation(
@@ -326,6 +335,7 @@ class DurableRunHttpTransport:
                 "status": final_status,
                 "run_ids": run_ids,
                 "pauses": all_pauses,
+                "outcome": final_outcome,
                 "transcript": transcript,
                 "response_lost_after_commit_injected": lost_injected,
                 "usage": {
