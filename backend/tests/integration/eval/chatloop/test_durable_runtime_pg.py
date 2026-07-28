@@ -202,6 +202,57 @@ class _B805ScriptedLLM:
         )
 
 
+class _B606ScriptedLLM:
+    provider = "scripted"
+    default_model = "scripted-v1"
+
+    def __init__(self) -> None:
+        self._step = 0
+
+    async def stream_step(self, **_kwargs: Any) -> StepResult:
+        self._step += 1
+        calls = {
+            1: StepToolCall(
+                id="call-b6-06-entitlements",
+                name="get_market_entitlements",
+                arguments="{}",
+            ),
+            2: StepToolCall(
+                id="call-b6-06-check-order",
+                name="check_order_eligibility",
+                arguments='{"ts_code":"688981.SH","side":"buy"}',
+            ),
+            3: StepToolCall(
+                id="call-b6-06-application-link",
+                name="get_entitlement_application_link",
+                arguments='{"market":"star"}',
+            ),
+        }
+        call = calls.get(self._step)
+        if call is not None:
+            return StepResult(
+                content="",
+                tool_calls=[call],
+                finish_reason="tool_calls",
+                prompt_tokens=2,
+                completion_tokens=1,
+                cached_tokens=0,
+                cost_cny=0.0,
+            )
+        return StepResult(
+            content=(
+                "当前没有科创板权限，我不能替你开通。这里是站内申请入口，"
+                "开通后你再回来，在新的一轮对话中重新发起交易。"
+            ),
+            tool_calls=[],
+            finish_reason="stop",
+            prompt_tokens=2,
+            completion_tokens=1,
+            cached_tokens=0,
+            cost_cny=0.0,
+        )
+
+
 class _CompletedExecutor:
     def __init__(self, commands: list[ExecuteChatRun]) -> None:
         self._commands = commands
@@ -422,6 +473,151 @@ async def test_execute_messages_projects_database_action_required_outcome(
         if driver is not None:
             await driver.aclose()
         await runtime.aclose()
+
+
+@pytest.mark.asyncio
+async def test_b6_06_runs_real_durable_market_permission_chain(
+    pg_test_container: dict[str, object],
+    tmp_path: Any,
+) -> None:
+    admin_dsn = _admin_dsn(pg_test_container)
+    runtime = DisposableEvalRuntime.provision(
+        admin_dsn=admin_dsn,
+        run_id=f"durable-b6-06-{uuid4().hex}",
+    )
+    driver: InProcessDurableDriver | None = None
+    environment = None
+    try:
+        skills_root = tmp_path / "skills"
+        workdir_root = tmp_path / "workdirs"
+        skills_root.mkdir()
+        singletons = await build_heavy_singletons(
+            session_factory=runtime.async_session_factory,
+            sync_session_factory=runtime.sync_session_factory,
+            mcp_client=None,
+            llm=_B606ScriptedLLM(),
+            memory=object(),
+            skills_root=skills_root,
+            workdir_root=workdir_root,
+        )
+
+        async def resource_factory() -> tuple[Any, Any]:
+            builder = build_chat_executor_builder(
+                singletons,
+                provider="scripted",
+                model="scripted-v1",
+                risk_policy=ToolRiskPolicy.from_trusted_names(
+                    {
+                        "get_market_entitlements",
+                        "check_order_eligibility",
+                        "get_entitlement_application_link",
+                    }
+                ),
+            )
+
+            async def cleanup() -> None:
+                return None
+
+            return builder, cleanup
+
+        driver = InProcessDurableDriver.lazy(
+            runtime.async_session_factory,
+            resource_factory=resource_factory,
+        )
+        runtime.bind_durable_driver(driver)
+        case = load_catalog().by_id("B6-06")
+        manager = CaseEnvironmentManager(runtime)
+        manager.require_execution_capabilities(case)
+        environment = await manager.prepare(case, trial_index=0)
+        before = environment.before_snapshot or await environment.capture_before()
+        actor = environment.actor("requester")
+        executor = DurableHttpBusinessExecutor(
+            runtime.async_session_factory,
+            base_url="http://run-api",
+            timeout_s=5,
+            client_transport=httpx.ASGITransport(
+                app=create_run_api_app(session_factory=runtime.async_session_factory)
+            ),
+            progress_callback=driver.advance,
+        )
+        context = BusinessExecutionContext(
+            case=case,
+            environment=environment,
+            actor=actor,
+            fault_plans=(),
+            transport_fault=TransportFaultPlan(),
+            barrier=DeterministicBarrier(),
+            execution_id="durable-b6-06-production-chain",
+        )
+
+        observation = await executor.execute(context)
+        after = await environment.capture_after()
+        run_id = UUID(observation.run_state["run_ids"][0])
+        async with runtime.async_session_factory() as session:
+            tool_rows = tuple(
+                await session.scalars(
+                    select(RunToolExecution)
+                    .where(RunToolExecution.run_id == run_id)
+                    .order_by(RunToolExecution.started_at, RunToolExecution.id)
+                )
+            )
+            orders = tuple(
+                await session.scalars(select(PaperOrder).where(PaperOrder.user_id == actor.user_id))
+            )
+
+        assert observation.run_state["status"] == "completed"
+        assert observation.run_state["outcome"]["code"] == "action_required"
+        assert observation.run_state["outcome"]["payload"]["action_url"] == (
+            "/market-permissions/star/apply"
+        )
+        assert [row.tool_name for row in tool_rows] == [
+            "get_market_entitlements",
+            "check_order_eligibility",
+            "get_entitlement_application_link",
+        ]
+        assert all(row.status == "completed" for row in tool_rows)
+        assert orders == ()
+        assert after["orders"]["count"] == 0
+
+        trial = BusinessTrialResult(
+            case_id=case.case_id,
+            trial_index=0,
+            trial_status="valid",
+            failure_reason=None,
+            observation=observation,
+            database_before_after={"before": before, "after": after},
+            environment_manifest=environment.manifest.to_dict(),
+            duration_ms=1,
+        )
+        structured = await BusinessStructuredEvidenceProvider(
+            versions={"model": "scripted-v1", "sut": "production-chatloop"},
+            semantic_judge=None,
+        ).build(case, trial)
+        evaluated = evaluate_trial(
+            case,
+            observation=structured,
+            policy_registry=PolicyRegistry.default(),
+            policy_as_of=load_catalog().policy_as_of,
+            policy_version=load_catalog().policy_version,
+        )
+
+        entitlements = structured["tools"]["get_market_entitlements"]["last_call"]["result"]
+        assert entitlements["entitlements"][0]["market"] == "star"
+        assert entitlements["entitlements"][0]["status"] == "not_applied"
+        eligibility = structured["tools"]["check_order_eligibility"]["last_call"]
+        assert eligibility["arguments"] == {"ts_code": "688981.SH", "side": "buy"}
+        assert eligibility["result"]["allowed"] is False
+        assert eligibility["result"]["required_permission"] == "star"
+        assert evaluated.trial_status is TrialStatus.VALID
+        assert evaluated.task_pass is True
+    finally:
+        if environment is not None:
+            await environment.cleanup()
+        if driver is not None:
+            await driver.aclose()
+        await runtime.aclose()
+
+    assert not _database_exists(admin_dsn, runtime.database_name)
 
 
 @pytest.mark.asyncio
