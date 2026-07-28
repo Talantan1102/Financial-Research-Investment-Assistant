@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import re
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -162,7 +164,8 @@ def test_assertion_ids_and_references_are_valid(catalog: CaseCatalog) -> None:
         assertion_ids = [assertion.assertion_id for assertion in assertions]
         assert len(assertion_ids) == len(set(assertion_ids)), case.case_id
         known = set(assertion_ids)
-        grader_ids = {item for grader in case.graders for item in grader.assertion_ids}
+        grader_references = [item for grader in case.graders for item in grader.assertion_ids]
+        grader_counts = Counter(grader_references)
         score_ids = {item for component in case.partial_credit for item in component.assertion_ids}
         positive_score_ids = {
             assertion.assertion_id
@@ -176,7 +179,8 @@ def test_assertion_ids_and_references_are_valid(catalog: CaseCatalog) -> None:
                 ],
             ]
         }
-        assert grader_ids == known, case.case_id
+        assert set(grader_counts) == known, case.case_id
+        assert all(count == 1 for count in grader_counts.values()), case.case_id
         assert score_ids == positive_score_ids, case.case_id
         assert all(component.assertion_ids for component in case.partial_credit), case.case_id
         assert sum(component.points for component in case.partial_credit) <= 100
@@ -413,3 +417,24 @@ def test_loader_rejects_incomplete_source_spec_manifest(tmp_path: Path) -> None:
 
     with pytest.raises(CaseCatalogError, match="source_specs"):
         load_catalog(manifest_path)
+
+
+def test_loader_rejects_assertion_owned_by_multiple_graders(tmp_path: Path) -> None:
+    source_dir = CaseCatalog.default_root()
+    copied = tmp_path / "v1"
+    copied.mkdir()
+    for source in source_dir.glob("*"):
+        (copied / source.name).write_bytes(source.read_bytes())
+
+    batch_path = copied / "batch-1.jsonl"
+    records = [json.loads(line) for line in batch_path.read_text("utf-8").splitlines()]
+    case = next(record for record in records if record["case_id"] == "B1-01")
+    duplicate_id = case["graders"][0]["assertion_ids"][0]
+    case["graders"][0]["assertion_ids"].append(duplicate_id)
+    batch_path.write_text(
+        "\n".join(json.dumps(record, ensure_ascii=False) for record in records) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CaseCatalogError, match="exactly one grader"):
+        load_catalog(copied / "catalog.json")

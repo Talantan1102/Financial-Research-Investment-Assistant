@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections import Counter
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -225,10 +226,19 @@ def _audit_case(
     if len(assertion_ids) != len(set(assertion_ids)):
         raise CaseCatalogError(f"duplicate assertion_id in {case.case_id}")
     known = set(assertion_ids)
-    grader_ids = {item for grader in case.graders for item in grader.assertion_ids}
+    grader_references = [item for grader in case.graders for item in grader.assertion_ids]
+    grader_counts = Counter(grader_references)
     score_ids = {item for component in case.partial_credit for item in component.assertion_ids}
-    if grader_ids != known:
+    if set(grader_counts) != known:
         raise CaseCatalogError(f"graders must cover every assertion in {case.case_id}")
+    duplicate_grader_ids = sorted(
+        assertion_id for assertion_id, count in grader_counts.items() if count != 1
+    )
+    if duplicate_grader_ids:
+        raise CaseCatalogError(
+            f"each assertion must belong to exactly one grader in {case.case_id}: "
+            f"{', '.join(duplicate_grader_ids)}"
+        )
     positive_score_ids = {
         assertion.assertion_id
         for assertion in [
