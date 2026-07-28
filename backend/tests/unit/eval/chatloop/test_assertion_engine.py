@@ -1,4 +1,4 @@
-"""Deterministic assertion-operator contract tests for business eval trials."""
+"""Deterministic assertion-engine contract tests for Task 3."""
 
 from __future__ import annotations
 
@@ -21,35 +21,35 @@ def passing_observation() -> dict[str, Any]:
             "status": "completed",
             "steps": ["plan", "answer"],
             "metadata": {"pause_reason": None},
+            "approved": True,
         },
         "tools": {
             "called": ["get_quote", "check_permissions", "place_order"],
             "ledger": {"count": 3},
+            "calls": None,
+            "flags": [True, False],
         },
         "database": {
             "before": {
                 "orders": {"count": 1, "ids": ["ord-1"]},
-                "portfolio": {"cash": 1000, "note": None},
+                "portfolio": {"cash": 1000, "note": None, "approved": True},
                 "watchlist": {"symbols": ["600519", "000001"]},
             },
             "after": {
                 "orders": {"count": 2, "ids": ["ord-1", "ord-2"]},
-                "portfolio": {"cash": 1000, "note": None},
+                "portfolio": {"cash": 1000, "note": None, "approved": True},
                 "watchlist": {"symbols": ["600519", "000001"]},
             },
         },
         "answer": {
-            "text": "已加入自选，但没有承诺收益。",
-            "bullets": ["先解释现状", "再说明限制"],
+            "text": "Added it to the watchlist without promising returns.",
+            "bullets": ["explain the current state", "explain the limit"],
         },
         "evidence": {
             "versions": {"code": "69a3d391", "policy": "2026.1"},
             "cost_latency": {"cost_usd": 0.02, "latency_ms": 321},
         },
-        "judge": {
-            "verdict": "supported",
-            "confidence": "high",
-        },
+        "judge": {"verdict": "supported", "confidence": "high"},
     }
 
 
@@ -86,6 +86,53 @@ def test_missing_database_snapshot_invalidates_evidence(engine: AssertionEngine)
 
     assert result.passed is False
     assert result.kind == "invalid_evidence"
+
+
+def test_top_level_null_source_is_invalid_evidence(engine: AssertionEngine) -> None:
+    result = engine.evaluate(
+        AssertionSpec(
+            assertion_id="tool-calls-exist",
+            source="tools",
+            operator="exists",
+            path="calls",
+        ),
+        observation={"tools": None},
+    )
+
+    assert result.passed is False
+    assert result.kind == "invalid_evidence"
+
+
+def test_present_nested_null_path_still_counts_as_exists(engine: AssertionEngine) -> None:
+    result = engine.evaluate(
+        AssertionSpec(
+            assertion_id="tool-calls-exist",
+            source="tools",
+            operator="exists",
+            path="calls",
+        ),
+        observation=passing_observation(),
+    )
+
+    assert result.passed is True
+    assert result.kind == "passed"
+    assert result.actual is None
+
+
+def test_list_shaped_source_is_not_invalid_by_itself(engine: AssertionEngine) -> None:
+    result = engine.evaluate(
+        AssertionSpec(
+            assertion_id="tool-order",
+            source="tools",
+            operator="ordered_subsequence",
+            path="",
+            expected=["get_quote", "place_order"],
+        ),
+        observation={"tools": ["get_quote", "check_permissions", "place_order"]},
+    )
+
+    assert result.passed is True
+    assert result.kind == "passed"
 
 
 def test_present_null_value_is_not_treated_as_missing(engine: AssertionEngine) -> None:
@@ -219,9 +266,9 @@ def test_unchanged_treats_missing_business_path_as_assertion_failure(
                 source="answer",
                 operator="contains",
                 path="text",
-                expected="自选",
+                expected="watchlist",
             ),
-            lambda observation: observation["answer"].__setitem__("text", "已完成下单"),
+            lambda observation: observation["answer"].__setitem__("text", "Order placed."),
         ),
         (
             AssertionSpec(
@@ -229,9 +276,11 @@ def test_unchanged_treats_missing_business_path_as_assertion_failure(
                 source="answer",
                 operator="not_contains",
                 path="text",
-                expected="保证收益",
+                expected="guaranteed return",
             ),
-            lambda observation: observation["answer"].__setitem__("text", "这次我保证收益。"),
+            lambda observation: observation["answer"].__setitem__(
+                "text", "This has a guaranteed return."
+            ),
         ),
         (
             AssertionSpec(
@@ -285,3 +334,128 @@ def test_each_operator_has_passing_and_single_mutation_failing_observation(
     assert passing.kind == "passed", assertion.assertion_id
     assert failing.passed is False, assertion.assertion_id
     assert failing.kind == "assertion_failed", assertion.assertion_id
+
+
+def test_equals_treats_bool_and_int_as_distinct(engine: AssertionEngine) -> None:
+    result = engine.evaluate(
+        AssertionSpec(
+            assertion_id="strict-bool-equals",
+            source="run",
+            operator="equals",
+            path="approved",
+            expected=1,
+        ),
+        observation=passing_observation(),
+    )
+
+    assert result.passed is False
+
+
+def test_not_equals_treats_bool_and_int_as_distinct(engine: AssertionEngine) -> None:
+    result = engine.evaluate(
+        AssertionSpec(
+            assertion_id="strict-bool-not-equals",
+            source="run",
+            operator="not_equals",
+            path="approved",
+            expected=1,
+        ),
+        observation=passing_observation(),
+    )
+
+    assert result.passed is True
+
+
+def test_unchanged_treats_bool_and_int_as_distinct(engine: AssertionEngine) -> None:
+    observation = passing_observation()
+    observation["database"]["after"]["portfolio"]["approved"] = 1
+
+    result = engine.evaluate(
+        AssertionSpec(
+            assertion_id="strict-bool-unchanged",
+            source="database",
+            operator="unchanged",
+            path="portfolio.approved",
+        ),
+        observation=observation,
+    )
+
+    assert result.passed is False
+    assert result.kind == "assertion_failed"
+
+
+def test_contains_treats_bool_and_int_membership_as_distinct(engine: AssertionEngine) -> None:
+    result = engine.evaluate(
+        AssertionSpec(
+            assertion_id="strict-bool-contains",
+            source="tools",
+            operator="contains",
+            path="flags",
+            expected=1,
+        ),
+        observation=passing_observation(),
+    )
+
+    assert result.passed is False
+
+
+def test_count_equals_rejects_bool_expected_value(engine: AssertionEngine) -> None:
+    result = engine.evaluate(
+        AssertionSpec(
+            assertion_id="strict-bool-count",
+            source="tools",
+            operator="count_equals",
+            path="called",
+            expected=True,
+        ),
+        observation=passing_observation(),
+    )
+
+    assert result.passed is False
+
+
+def test_ordered_subsequence_treats_bool_and_int_items_as_distinct(
+    engine: AssertionEngine,
+) -> None:
+    result = engine.evaluate(
+        AssertionSpec(
+            assertion_id="strict-bool-subsequence",
+            source="tools",
+            operator="ordered_subsequence",
+            path="flags",
+            expected=[1],
+        ),
+        observation=passing_observation(),
+    )
+
+    assert result.passed is False
+
+
+def test_subset_treats_bool_and_int_values_as_distinct(engine: AssertionEngine) -> None:
+    result = engine.evaluate(
+        AssertionSpec(
+            assertion_id="strict-bool-subset",
+            source="database",
+            operator="subset",
+            path="before.portfolio",
+            expected={"approved": 1},
+        ),
+        observation=passing_observation(),
+    )
+
+    assert result.passed is False
+
+
+def test_empty_ordered_subsequence_explicitly_passes(engine: AssertionEngine) -> None:
+    result = engine.evaluate(
+        AssertionSpec(
+            assertion_id="empty-subsequence",
+            source="tools",
+            operator="ordered_subsequence",
+            path="called",
+            expected=[],
+        ),
+        observation=passing_observation(),
+    )
+
+    assert result.passed is True

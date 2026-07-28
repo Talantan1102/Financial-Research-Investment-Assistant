@@ -63,6 +63,13 @@ class AssertionEngine:
             )
 
         source_value = observation[assertion.source]
+        if source_value is None:
+            return self._result(
+                assertion,
+                passed=False,
+                kind=AssertionResultKind.INVALID_EVIDENCE,
+                actual="<null_source>",
+            )
         if assertion.operator == "unchanged":
             return self._evaluate_unchanged(assertion, source_value)
 
@@ -122,7 +129,7 @@ class AssertionEngine:
             )
 
         actual = {"before": before.value, "after": after.value}
-        passed = before.value == after.value
+        passed = self._strict_equal(before.value, after.value)
         return self._result(
             assertion,
             passed=passed,
@@ -152,9 +159,9 @@ class AssertionEngine:
 
     def _compare(self, operator: str, actual: Any, expected: Any) -> bool:
         if operator == "equals":
-            return actual == expected
+            return self._strict_equal(actual, expected)
         if operator == "not_equals":
-            return actual != expected
+            return not self._strict_equal(actual, expected)
         if operator == "exists":
             return True
         if operator == "contains":
@@ -162,6 +169,8 @@ class AssertionEngine:
         if operator == "not_contains":
             return not self._contains(actual, expected)
         if operator == "count_equals":
+            if isinstance(expected, bool):
+                return False
             try:
                 return len(actual) == expected
             except TypeError:
@@ -196,8 +205,10 @@ class AssertionEngine:
     def _contains(self, actual: Any, expected: Any) -> bool:
         if isinstance(actual, Mapping):
             return expected in actual
-        if isinstance(actual, (str, list, tuple, set, frozenset)):
+        if isinstance(actual, str):
             return expected in actual
+        if isinstance(actual, (list, tuple, set, frozenset)):
+            return any(self._strict_equal(item, expected) for item in actual)
         return False
 
     def _ordered_subsequence(self, actual: Any, expected: Any) -> bool:
@@ -205,9 +216,11 @@ class AssertionEngine:
             return False
         if not isinstance(expected, Sequence) or isinstance(expected, (str, bytes, bytearray)):
             return False
+        if len(expected) == 0:
+            return True
         index = 0
         for item in actual:
-            if index < len(expected) and item == expected[index]:
+            if index < len(expected) and self._strict_equal(item, expected[index]):
                 index += 1
         return index == len(expected)
 
@@ -215,7 +228,10 @@ class AssertionEngine:
         if isinstance(actual, Mapping):
             if not isinstance(expected, Mapping):
                 return False
-            return all(key in actual and actual[key] == value for key, value in expected.items())
+            return all(
+                key in actual and self._strict_equal(actual[key], value)
+                for key, value in expected.items()
+            )
         if isinstance(actual, str):
             if isinstance(expected, str):
                 return expected in actual
@@ -226,6 +242,30 @@ class AssertionEngine:
             return False
         if isinstance(actual, (Sequence, set, frozenset)):
             if isinstance(expected, Sequence) and not isinstance(expected, (str, bytes, bytearray)):
-                return all(item in actual for item in expected)
-            return expected in actual
+                return all(
+                    any(self._strict_equal(candidate, item) for candidate in actual)
+                    for item in expected
+                )
+            return any(self._strict_equal(candidate, expected) for candidate in actual)
         return False
+
+    def _strict_equal(self, actual: Any, expected: Any) -> bool:
+        if isinstance(actual, bool) or isinstance(expected, bool):
+            return isinstance(actual, bool) and isinstance(expected, bool) and actual is expected
+        if isinstance(actual, Mapping) and isinstance(expected, Mapping):
+            if set(actual) != set(expected):
+                return False
+            return all(self._strict_equal(actual[key], expected[key]) for key in actual)
+        if (
+            isinstance(actual, Sequence)
+            and isinstance(expected, Sequence)
+            and not isinstance(actual, (str, bytes, bytearray))
+            and not isinstance(expected, (str, bytes, bytearray))
+        ):
+            if len(actual) != len(expected):
+                return False
+            return all(
+                self._strict_equal(actual_item, expected_item)
+                for actual_item, expected_item in zip(actual, expected, strict=True)
+            )
+        return actual == expected

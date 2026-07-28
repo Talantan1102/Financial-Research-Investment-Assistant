@@ -16,7 +16,13 @@ from eval.chatloop.case_schema import (
     ConversationCase,
     ScoreComponent,
 )
-from eval.chatloop.policy_registry import PolicyRegistry, Severity, Violation
+from eval.chatloop.policy_registry import (
+    PolicyRegistry,
+    PolicyRegistryError,
+    PolicySeverityError,
+    Severity,
+    Violation,
+)
 
 __all__ = [
     "AcceptableOutcomeResult",
@@ -116,9 +122,20 @@ def evaluate_trial(
     policy_version: str | None = None,
     q_deductions: float = 0.0,
     harness_failure_reason: str | None = None,
+    triggered_escalations_by_assertion: Mapping[str, Sequence[str]] | None = None,
     assertion_engine: AssertionEngine | None = None,
 ) -> TrialEvaluation:
     engine = assertion_engine or AssertionEngine()
+    escalation_map = (
+        {}
+        if triggered_escalations_by_assertion is None
+        else dict(triggered_escalations_by_assertion)
+    )
+
+    try:
+        _validate_case_assertion_ids(case)
+    except EvaluatorConfigurationError as exc:
+        return evaluate_harness_failure(str(exc))
 
     required_results = _evaluate_group(engine, case.required_assertions, observation)
     forbidden_results = _evaluate_group(engine, case.forbidden_outcomes, observation)
@@ -127,8 +144,9 @@ def evaluate_trial(
         _evaluate_acceptable_outcome(engine, outcome, observation)
         for outcome in case.acceptable_outcomes
     )
+    passing_acceptable_results = tuple(result for result in acceptable_results if result.passed)
     selected_acceptable_result = next(
-        (result for result in acceptable_results if result.passed),
+        iter(passing_acceptable_results),
         None,
     )
 
@@ -155,7 +173,7 @@ def evaluate_trial(
                 required_results,
                 forbidden_results,
                 expected_results,
-                selected_acceptable_result,
+                passing_acceptable_results,
                 (),
             ),
         )
@@ -178,7 +196,7 @@ def evaluate_trial(
                 required_results,
                 forbidden_results,
                 expected_results,
-                selected_acceptable_result,
+                passing_acceptable_results,
                 (),
             ),
         )
@@ -200,7 +218,7 @@ def evaluate_trial(
                 required_results,
                 forbidden_results,
                 expected_results,
-                selected_acceptable_result,
+                passing_acceptable_results,
                 (),
             ),
         )
@@ -221,8 +239,9 @@ def evaluate_trial(
             required_results,
             forbidden_results,
             expected_results,
-            selected_acceptable_result,
+            passing_acceptable_results,
         )
+        _validate_triggered_escalation_mapping(all_results, escalation_map)
         raw_score = calculate_raw_score(case.partial_credit, all_results)
     except EvaluatorConfigurationError as exc:
         return TrialEvaluation(
@@ -244,16 +263,33 @@ def evaluate_trial(
             required_results,
             forbidden_results,
             expected_results,
-            selected_acceptable_result,
+            passing_acceptable_results,
+            escalation_map,
         )
     )
-    task_score = policy_registry.apply_caps(
-        raw_score=raw_score,
-        q_deductions=q_deductions,
-        violations=violations,
-        as_of=policy_as_of,
-        version=policy_version,
-    )
+    try:
+        task_score = policy_registry.apply_caps(
+            raw_score=raw_score,
+            q_deductions=q_deductions,
+            violations=violations,
+            as_of=policy_as_of,
+            version=policy_version,
+        )
+    except (PolicyRegistryError, PolicySeverityError) as exc:
+        return TrialEvaluation(
+            trial_status=TrialStatus.HARNESS_FAILED,
+            task_pass=None,
+            task_score=None,
+            raw_score=None,
+            failure_reason=str(exc),
+            required_results=required_results,
+            forbidden_results=forbidden_results,
+            expected_state_change_results=expected_results,
+            acceptable_outcome_results=acceptable_results,
+            selected_acceptable_outcome=selected_acceptable_outcome,
+            violations=(),
+            human_review_flags=(),
+        )
 
     return TrialEvaluation(
         trial_status=TrialStatus.VALID,
@@ -271,7 +307,7 @@ def evaluate_trial(
             required_results,
             forbidden_results,
             expected_results,
-            selected_acceptable_result,
+            passing_acceptable_results,
             violations,
         ),
     )
@@ -374,18 +410,18 @@ def _flatten_results(
     required_results: Sequence[AssertionResult],
     forbidden_results: Sequence[AssertionResult],
     expected_results: Sequence[AssertionResult],
-    selected_acceptable_result: AcceptableOutcomeResult | None,
+    passing_acceptable_results: Sequence[AcceptableOutcomeResult],
 ) -> dict[str, AssertionResult]:
     return _strict_result_map(
         [
             *required_results,
             *forbidden_results,
             *expected_results,
-            *(
-                ()
-                if selected_acceptable_result is None
-                else selected_acceptable_result.assertion_results
-            ),
+            *[
+                result
+                for acceptable_result in passing_acceptable_results
+                for result in acceptable_result.assertion_results
+            ],
         ]
     )
 
@@ -414,35 +450,44 @@ def _build_violations(
     required_results: Sequence[AssertionResult],
     forbidden_results: Sequence[AssertionResult],
     expected_results: Sequence[AssertionResult],
-    selected_acceptable_result: AcceptableOutcomeResult | None,
+    passing_acceptable_results: Sequence[AcceptableOutcomeResult],
+    triggered_escalations_by_assertion: Mapping[str, Sequence[str]],
 ) -> Iterable[Violation]:
+    consumed_assertion_ids: set[str] = set()
     for result in [*required_results, *expected_results]:
         if result.policy_id and result.severity in {"C0", "C1", "C2", "C3"} and not result.passed:
+            consumed_assertion_ids.add(result.assertion_id)
             yield Violation(
                 policy_id=result.policy_id,
                 severity=cast(Severity, result.severity),
+                triggered_escalations=list(
+                    triggered_escalations_by_assertion.get(result.assertion_id, ())
+                ),
             )
     for result in forbidden_results:
         if result.policy_id and result.severity in {"C0", "C1", "C2", "C3"} and result.passed:
+            consumed_assertion_ids.add(result.assertion_id)
             yield Violation(
                 policy_id=result.policy_id,
                 severity=cast(Severity, result.severity),
+                triggered_escalations=list(
+                    triggered_escalations_by_assertion.get(result.assertion_id, ())
+                ),
             )
-    if selected_acceptable_result is None:
-        return
-    for result in selected_acceptable_result.assertion_results:
-        if result.policy_id and result.severity in {"C0", "C1", "C2", "C3"} and not result.passed:
-            yield Violation(
-                policy_id=result.policy_id,
-                severity=cast(Severity, result.severity),
-            )
+    if set(triggered_escalations_by_assertion) - consumed_assertion_ids:
+        unused_keys = ", ".join(
+            sorted(set(triggered_escalations_by_assertion) - consumed_assertion_ids)
+        )
+        raise EvaluatorConfigurationError(
+            f"triggered escalations configured for non-violating assertion: {unused_keys}"
+        )
 
 
 def _human_review_flags(
     required_results: Sequence[AssertionResult],
     forbidden_results: Sequence[AssertionResult],
     expected_results: Sequence[AssertionResult],
-    selected_acceptable_result: AcceptableOutcomeResult | None,
+    passing_acceptable_results: Sequence[AcceptableOutcomeResult],
     violations: Sequence[Violation],
 ) -> tuple[HumanReviewFlag, ...]:
     flags: dict[tuple[str, str, str | None], HumanReviewFlag] = {}
@@ -459,7 +504,7 @@ def _human_review_flags(
         required_results,
         forbidden_results,
         expected_results,
-        selected_acceptable_result,
+        passing_acceptable_results,
     ):
         if result.source != "judge" or not isinstance(result.actual, str):
             continue
@@ -480,13 +525,13 @@ def _iter_all_results(
     required_results: Sequence[AssertionResult],
     forbidden_results: Sequence[AssertionResult],
     expected_results: Sequence[AssertionResult],
-    selected_acceptable_result: AcceptableOutcomeResult | None,
+    passing_acceptable_results: Sequence[AcceptableOutcomeResult],
 ) -> Iterable[AssertionResult]:
     yield from required_results
     yield from forbidden_results
     yield from expected_results
-    if selected_acceptable_result is not None:
-        yield from selected_acceptable_result.assertion_results
+    for acceptable_result in passing_acceptable_results:
+        yield from acceptable_result.assertion_results
 
 
 def _strict_result_map(results: Sequence[AssertionResult]) -> dict[str, AssertionResult]:
@@ -499,3 +544,42 @@ def _strict_result_map(results: Sequence[AssertionResult]) -> dict[str, Assertio
             )
         flattened[result.assertion_id] = result
     return flattened
+
+
+def _validate_case_assertion_ids(case: ConversationCase) -> None:
+    seen: set[str] = set()
+    all_assertions = [
+        *case.required_assertions,
+        *case.forbidden_outcomes,
+        *case.expected_state_changes,
+        *[
+            assertion
+            for acceptable_outcome in case.acceptable_outcomes
+            for assertion in acceptable_outcome.assertions
+        ],
+    ]
+    for assertion in all_assertions:
+        if assertion.assertion_id in seen:
+            raise EvaluatorConfigurationError(
+                f"duplicate assertion id across case scope: {assertion.assertion_id}"
+            )
+        seen.add(assertion.assertion_id)
+
+
+def _validate_triggered_escalation_mapping(
+    all_results: Mapping[str, AssertionResult],
+    triggered_escalations_by_assertion: Mapping[str, Sequence[str]],
+) -> None:
+    if not triggered_escalations_by_assertion:
+        return
+    policy_linked_ids = {
+        result.assertion_id
+        for result in all_results.values()
+        if result.policy_id is not None and result.severity in {"C0", "C1", "C2", "C3"}
+    }
+    invalid_keys = sorted(set(triggered_escalations_by_assertion) - policy_linked_ids)
+    if invalid_keys:
+        invalid_text = ", ".join(invalid_keys)
+        raise EvaluatorConfigurationError(
+            f"triggered escalations reference non-policy or unknown assertion: {invalid_text}"
+        )
