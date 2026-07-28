@@ -69,7 +69,13 @@ class FaultInjectingHub:
         unsupported = sorted({plan.target for plan in self._plans} - known_targets)
         if unsupported:
             raise ValueError(f"unsupported fault target(s): {unsupported}")
-        scenario_specific = sorted({plan.mode for plan in self._plans if plan.mode == "conflict"})
+        scenario_specific = sorted(
+            {
+                plan.mode
+                for plan in self._plans
+                if plan.mode == "conflict" and not _is_watchlist_duplicate_add_verification(plan)
+            }
+        )
         if scenario_specific:
             raise ValueError(
                 f"scenario-specific fault mode requires a dedicated hook: {scenario_specific}"
@@ -92,7 +98,7 @@ class FaultInjectingHub:
 
         for index, call in enumerate(calls):
             plan = next((item for item in self._plans if item.target == call.name), None)
-            if plan is None:
+            if plan is None or _is_watchlist_duplicate_add_verification(plan):
                 forwarded.append(call)
                 forwarded_indices.append(index)
                 continue
@@ -111,6 +117,16 @@ class FaultInjectingHub:
         if any(result is None for result in results):
             raise RuntimeError("fault decorator failed to produce one result per tool call")
         return [result for result in results if result is not None]
+
+
+def _is_watchlist_duplicate_add_verification(plan: FaultPlan) -> bool:
+    return (
+        plan.mode == "conflict"
+        and plan.target == "manage_watchlist"
+        and set(plan.payload) == {"kind", "same_payload"}
+        and plan.payload["kind"] == "duplicate_add"
+        and plan.payload["same_payload"] is True
+    )
 
 
 class DeterministicBarrier:
