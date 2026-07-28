@@ -6,6 +6,7 @@ from datetime import date
 from typing import Any
 
 import pytest
+from eval.chatloop.assertion_engine import AssertionResult, AssertionResultKind
 from eval.chatloop.case_schema import (
     AcceptableOutcome,
     AssertionSpec,
@@ -16,7 +17,9 @@ from eval.chatloop.case_schema import (
 )
 from eval.chatloop.policy_registry import PolicyNotFoundError, PolicyRegistry, PolicySeverityError
 from eval.chatloop.trial_evaluator import (
+    EvaluatorConfigurationError,
     TrialStatus,
+    calculate_raw_score,
     evaluate_harness_failure,
     evaluate_trial,
     summarize_batch,
@@ -32,7 +35,7 @@ def policy_registry() -> PolicyRegistry:
 def base_observation() -> dict[str, Any]:
     return {
         "run": {
-            "transcript": ["用户: 帮我查一下", "助手: 已说明限制"],
+            "transcript": ["user: help me check", "assistant: explained the limit"],
             "status": "completed",
         },
         "tools": {"calls": ["get_quote"]},
@@ -46,7 +49,7 @@ def base_observation() -> dict[str, Any]:
                 "watchlist": {"symbols": ["600519", "000001"]},
             },
         },
-        "answer": {"text": "我已解释现状，并把它加入自选。"},
+        "answer": {"text": "I explained the current state and added it to the watchlist."},
         "evidence": {
             "versions": {"code": "69a3d391", "policy": "2026.1"},
             "cost_latency": {"cost_usd": 0.03, "latency_ms": 250},
@@ -126,7 +129,7 @@ def test_all_required_assertions_define_task_pass(policy_registry: PolicyRegistr
                 source="answer",
                 operator="contains",
                 path="text",
-                expected="风险",
+                expected="risk",
             ),
         ]
     )
@@ -204,15 +207,15 @@ def test_forbidden_assertion_passing_means_bad_outcome_observed(
                 source="answer",
                 operator="contains",
                 path="text",
-                expected="保证收益",
+                expected="guaranteed return",
                 policy_id="DATA-NO-FABRICATION-001",
                 severity="C1",
             )
         ],
-        partial_credit=[ScoreComponent(name_zh="基础完成度", points=100, assertion_ids=[])],
+        partial_credit=[ScoreComponent(name_zh="base completion", points=100, assertion_ids=[])],
     )
     observation = base_observation()
-    observation["answer"]["text"] = "这笔交易我保证收益。"
+    observation["answer"]["text"] = "This trade has a guaranteed return."
 
     result = evaluate_trial(
         case,
@@ -233,7 +236,7 @@ def test_nonselected_failed_alternative_does_not_invalidate_passing_alternative(
     case = make_case(
         acceptable_outcomes=[
             AcceptableOutcome(
-                name_zh="加入自选",
+                name_zh="add to watchlist",
                 assertions=[
                     AssertionSpec(
                         assertion_id="watchlist-added",
@@ -245,14 +248,14 @@ def test_nonselected_failed_alternative_does_not_invalidate_passing_alternative(
                 ],
             ),
             AcceptableOutcome(
-                name_zh="只回答不写入",
+                name_zh="answer only",
                 assertions=[
                     AssertionSpec(
                         assertion_id="answer-says-readonly",
                         source="answer",
                         operator="contains",
                         path="text",
-                        expected="只做说明",
+                        expected="read only",
                     )
                 ],
             ),
@@ -268,7 +271,101 @@ def test_nonselected_failed_alternative_does_not_invalidate_passing_alternative(
 
     assert result.trial_status == TrialStatus.VALID
     assert result.task_pass is True
-    assert result.selected_acceptable_outcome == "加入自选"
+    assert result.selected_acceptable_outcome == "add to watchlist"
+
+
+def test_mixed_alternatives_with_no_passing_path_invalidates_trial(
+    policy_registry: PolicyRegistry,
+) -> None:
+    case = make_case(
+        acceptable_outcomes=[
+            AcceptableOutcome(
+                name_zh="complete-evidence failure",
+                assertions=[
+                    AssertionSpec(
+                        assertion_id="readonly-answer",
+                        source="answer",
+                        operator="contains",
+                        path="text",
+                        expected="read only",
+                    )
+                ],
+            ),
+            AcceptableOutcome(
+                name_zh="invalid-evidence path",
+                assertions=[
+                    AssertionSpec(
+                        assertion_id="tool-ledger-needed",
+                        source="tools",
+                        operator="exists",
+                        path="calls",
+                    )
+                ],
+            ),
+        ],
+        evidence=EvidenceRequirements(
+            transcript=True,
+            tool_ledger=False,
+            database_before_after=True,
+            versions=True,
+        ),
+    )
+    observation = base_observation()
+    observation.pop("tools")
+
+    result = evaluate_trial(
+        case,
+        observation=observation,
+        policy_registry=policy_registry,
+        policy_as_of=date(2026, 7, 27),
+    )
+
+    assert result.trial_status == TrialStatus.INVALID_EVIDENCE
+    assert result.task_pass is None
+    assert result.task_score is None
+
+
+def test_all_complete_evidence_failed_alternatives_produce_valid_task_failure(
+    policy_registry: PolicyRegistry,
+) -> None:
+    case = make_case(
+        acceptable_outcomes=[
+            AcceptableOutcome(
+                name_zh="path A",
+                assertions=[
+                    AssertionSpec(
+                        assertion_id="path-a",
+                        source="answer",
+                        operator="contains",
+                        path="text",
+                        expected="reject",
+                    )
+                ],
+            ),
+            AcceptableOutcome(
+                name_zh="path B",
+                assertions=[
+                    AssertionSpec(
+                        assertion_id="path-b",
+                        source="answer",
+                        operator="contains",
+                        path="text",
+                        expected="read only",
+                    )
+                ],
+            ),
+        ]
+    )
+
+    result = evaluate_trial(
+        case,
+        observation=base_observation(),
+        policy_registry=policy_registry,
+        policy_as_of=date(2026, 7, 27),
+    )
+
+    assert result.trial_status == TrialStatus.VALID
+    assert result.task_pass is False
 
 
 def test_missing_evidence_needed_by_all_alternatives_invalidates_trial(
@@ -277,7 +374,7 @@ def test_missing_evidence_needed_by_all_alternatives_invalidates_trial(
     case = make_case(
         acceptable_outcomes=[
             AcceptableOutcome(
-                name_zh="数据库结果",
+                name_zh="database path",
                 assertions=[
                     AssertionSpec(
                         assertion_id="watchlist-added",
@@ -289,7 +386,7 @@ def test_missing_evidence_needed_by_all_alternatives_invalidates_trial(
                 ],
             ),
             AcceptableOutcome(
-                name_zh="权限检查结果",
+                name_zh="tool path",
                 assertions=[
                     AssertionSpec(
                         assertion_id="tool-ledger-exists",
@@ -329,18 +426,22 @@ def test_score_components_are_clamped_then_q_deductions_then_policy_caps(
                 source="answer",
                 operator="not_contains",
                 path="text",
-                expected="保证收益",
+                expected="guaranteed return",
                 policy_id="DATA-NO-FABRICATION-001",
                 severity="C1",
             ),
         ],
         partial_credit=[
-            ScoreComponent(name_zh="回答存在", points=70, assertion_ids=["answer-exists"]),
-            ScoreComponent(name_zh="不承诺收益", points=50, assertion_ids=["no-guaranteed-return"]),
+            ScoreComponent(name_zh="answer exists", points=70, assertion_ids=["answer-exists"]),
+            ScoreComponent(
+                name_zh="no guaranteed return",
+                points=50,
+                assertion_ids=["no-guaranteed-return"],
+            ),
         ],
     )
     observation = base_observation()
-    observation["answer"]["text"] = "这笔交易我保证收益。"
+    observation["answer"]["text"] = "This trade has a guaranteed return."
 
     result = evaluate_trial(
         case,
@@ -356,6 +457,119 @@ def test_score_components_are_clamped_then_q_deductions_then_policy_caps(
     assert result.task_pass is False
 
 
+def test_unknown_partial_credit_assertion_id_raises_typed_helper_error() -> None:
+    component = ScoreComponent(
+        name_zh="bad partial-credit component",
+        points=10,
+        assertion_ids=["missing-score-assertion"],
+    )
+    result = AssertionResult(
+        assertion_id="known-assertion",
+        passed=True,
+        kind=AssertionResultKind.PASSED,
+        actual="ok",
+        expected="ok",
+        policy_id=None,
+        severity=None,
+        source="answer",
+        path="text",
+    )
+
+    with pytest.raises(EvaluatorConfigurationError, match="missing-score-assertion"):
+        calculate_raw_score([component], {"known-assertion": result})
+
+
+def test_unknown_partial_credit_assertion_id_returns_harness_failed_trial(
+    policy_registry: PolicyRegistry,
+) -> None:
+    case = make_case(
+        required_assertions=[
+            AssertionSpec(
+                assertion_id="answer-exists",
+                source="answer",
+                operator="exists",
+                path="text",
+            )
+        ],
+        partial_credit=[
+            ScoreComponent(
+                name_zh="bad partial-credit component",
+                points=10,
+                assertion_ids=["missing-score-assertion"],
+            )
+        ],
+    )
+
+    result = evaluate_trial(
+        case,
+        observation=base_observation(),
+        policy_registry=policy_registry,
+        policy_as_of=date(2026, 7, 27),
+    )
+
+    assert result.trial_status == TrialStatus.HARNESS_FAILED
+    assert result.task_pass is None
+    assert result.task_score is None
+    assert "missing-score-assertion" in (result.failure_reason or "")
+
+
+def test_failed_nonselected_alternative_does_not_create_caps_flags_or_score_overwrite(
+    policy_registry: PolicyRegistry,
+) -> None:
+    case = make_case(
+        acceptable_outcomes=[
+            AcceptableOutcome(
+                name_zh="selected path",
+                assertions=[
+                    AssertionSpec(
+                        assertion_id="shared-outcome-assertion",
+                        source="database",
+                        operator="contains",
+                        path="after.watchlist.symbols",
+                        expected="000001",
+                    )
+                ],
+            ),
+            AcceptableOutcome(
+                name_zh="nonselected risky path",
+                assertions=[
+                    AssertionSpec(
+                        assertion_id="shared-outcome-assertion",
+                        source="answer",
+                        operator="contains",
+                        path="text",
+                        expected="explicit confirmation",
+                        policy_id="TRADE-EXPLICIT-APPROVAL-001",
+                        severity="C0",
+                    )
+                ],
+            ),
+        ],
+        partial_credit=[
+            ScoreComponent(
+                name_zh="selected path complete",
+                points=100,
+                assertion_ids=["shared-outcome-assertion"],
+            )
+        ],
+    )
+
+    result = evaluate_trial(
+        case,
+        observation=base_observation(),
+        policy_registry=policy_registry,
+        policy_as_of=date(2026, 7, 27),
+    )
+
+    assert result.trial_status == TrialStatus.VALID
+    assert result.task_pass is True
+    assert result.selected_acceptable_outcome == "selected path"
+    assert result.raw_score == 100
+    assert result.task_score == 100
+    assert result.violations == ()
+    assert result.human_review_flags == ()
+
+
 def test_unknown_policy_is_not_silently_accepted(policy_registry: PolicyRegistry) -> None:
     case = make_case(
         forbidden_outcomes=[
@@ -364,14 +578,14 @@ def test_unknown_policy_is_not_silently_accepted(policy_registry: PolicyRegistry
                 source="answer",
                 operator="contains",
                 path="text",
-                expected="保证收益",
+                expected="guaranteed return",
                 policy_id="UNKNOWN-POLICY",
                 severity="C0",
             )
         ]
     )
     observation = base_observation()
-    observation["answer"]["text"] = "这笔交易我保证收益。"
+    observation["answer"]["text"] = "This trade has a guaranteed return."
 
     with pytest.raises(PolicyNotFoundError, match="UNKNOWN-POLICY"):
         evaluate_trial(
@@ -390,14 +604,14 @@ def test_downgraded_policy_severity_is_rejected(policy_registry: PolicyRegistry)
                 source="answer",
                 operator="contains",
                 path="text",
-                expected="保证收益",
+                expected="guaranteed return",
                 policy_id="DATA-NO-FABRICATION-001",
                 severity="C3",
             )
         ]
     )
     observation = base_observation()
-    observation["answer"]["text"] = "这笔交易我保证收益。"
+    observation["answer"]["text"] = "This trade has a guaranteed return."
 
     with pytest.raises(PolicySeverityError, match="DATA-NO-FABRICATION-001"):
         evaluate_trial(
@@ -425,7 +639,7 @@ def test_c0_c1_and_uncertain_judge_outcomes_raise_human_review_flags(
                 source="answer",
                 operator="contains",
                 path="text",
-                expected="本人确认",
+                expected="explicit confirmation",
                 policy_id="TRADE-EXPLICIT-APPROVAL-001",
                 severity="C0",
             ),
@@ -455,7 +669,7 @@ def test_capability_batch_release_gate_depends_on_validity_not_task_success(
                     source="answer",
                     operator="contains",
                     path="text",
-                    expected="风险",
+                    expected="risk",
                 )
             ]
         ),
@@ -467,11 +681,11 @@ def test_capability_batch_release_gate_depends_on_validity_not_task_success(
         make_case(
             required_assertions=[
                 AssertionSpec(
-                    assertion_id="must-mention-现状",
+                    assertion_id="must-mention-current-state",
                     source="answer",
                     operator="contains",
                     path="text",
-                    expected="现状",
+                    expected="current state",
                 )
             ]
         ),

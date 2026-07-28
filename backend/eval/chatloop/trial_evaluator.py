@@ -10,15 +10,22 @@ from statistics import fmean
 from typing import Any, cast
 
 from eval.chatloop.assertion_engine import AssertionEngine, AssertionResult, AssertionResultKind
-from eval.chatloop.case_schema import AcceptableOutcome, AssertionSpec, ConversationCase
+from eval.chatloop.case_schema import (
+    AcceptableOutcome,
+    AssertionSpec,
+    ConversationCase,
+    ScoreComponent,
+)
 from eval.chatloop.policy_registry import PolicyRegistry, Severity, Violation
 
 __all__ = [
     "AcceptableOutcomeResult",
     "BatchSummary",
+    "EvaluatorConfigurationError",
     "HumanReviewFlag",
     "TrialEvaluation",
     "TrialStatus",
+    "calculate_raw_score",
     "evaluate_harness_failure",
     "evaluate_trial",
     "summarize_batch",
@@ -30,6 +37,10 @@ class TrialStatus(StrEnum):
     VALID = "valid"
     HARNESS_FAILED = "harness_failed"
     INVALID_EVIDENCE = "invalid_evidence"
+
+
+class EvaluatorConfigurationError(ValueError):
+    """Raised when evaluator config references unavailable or ambiguous assertion results."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,9 +127,17 @@ def evaluate_trial(
         _evaluate_acceptable_outcome(engine, outcome, observation)
         for outcome in case.acceptable_outcomes
     )
+    selected_acceptable_result = next(
+        (result for result in acceptable_results if result.passed),
+        None,
+    )
 
     if _has_invalid_evidence(
-        required_results, forbidden_results, expected_results, acceptable_results
+        required_results,
+        forbidden_results,
+        expected_results,
+        acceptable_results,
+        selected_acceptable_result,
     ):
         return TrialEvaluation(
             trial_status=TrialStatus.INVALID_EVIDENCE,
@@ -136,7 +155,7 @@ def evaluate_trial(
                 required_results,
                 forbidden_results,
                 expected_results,
-                acceptable_results,
+                selected_acceptable_result,
                 (),
             ),
         )
@@ -159,7 +178,7 @@ def evaluate_trial(
                 required_results,
                 forbidden_results,
                 expected_results,
-                acceptable_results,
+                selected_acceptable_result,
                 (),
             ),
         )
@@ -181,14 +200,13 @@ def evaluate_trial(
                 required_results,
                 forbidden_results,
                 expected_results,
-                acceptable_results,
+                selected_acceptable_result,
                 (),
             ),
         )
 
-    selected_acceptable_outcome = next(
-        (result.name_zh for result in acceptable_results if result.passed),
-        None,
+    selected_acceptable_outcome = (
+        None if selected_acceptable_result is None else selected_acceptable_result.name_zh
     )
     acceptable_pass = selected_acceptable_outcome is not None or not acceptable_results
     mandatory_pass = (
@@ -198,15 +216,36 @@ def evaluate_trial(
         and acceptable_pass
     )
 
-    all_results = _flatten_results(
-        required_results,
-        forbidden_results,
-        expected_results,
-        acceptable_results,
-    )
-    raw_score = _raw_score(case.partial_credit, all_results)
+    try:
+        all_results = _flatten_results(
+            required_results,
+            forbidden_results,
+            expected_results,
+            selected_acceptable_result,
+        )
+        raw_score = calculate_raw_score(case.partial_credit, all_results)
+    except EvaluatorConfigurationError as exc:
+        return TrialEvaluation(
+            trial_status=TrialStatus.HARNESS_FAILED,
+            task_pass=None,
+            task_score=None,
+            raw_score=None,
+            failure_reason=str(exc),
+            required_results=required_results,
+            forbidden_results=forbidden_results,
+            expected_state_change_results=expected_results,
+            acceptable_outcome_results=acceptable_results,
+            selected_acceptable_outcome=selected_acceptable_outcome,
+            violations=(),
+            human_review_flags=(),
+        )
     violations = tuple(
-        _build_violations(required_results, forbidden_results, expected_results, acceptable_results)
+        _build_violations(
+            required_results,
+            forbidden_results,
+            expected_results,
+            selected_acceptable_result,
+        )
     )
     task_score = policy_registry.apply_caps(
         raw_score=raw_score,
@@ -232,7 +271,7 @@ def evaluate_trial(
             required_results,
             forbidden_results,
             expected_results,
-            acceptable_results,
+            selected_acceptable_result,
             violations,
         ),
     )
@@ -293,15 +332,16 @@ def _has_invalid_evidence(
     forbidden_results: Sequence[AssertionResult],
     expected_results: Sequence[AssertionResult],
     acceptable_results: Sequence[AcceptableOutcomeResult],
+    selected_acceptable_result: AcceptableOutcomeResult | None,
 ) -> bool:
     mandatory_results = [*required_results, *forbidden_results, *expected_results]
     if any(result.kind is AssertionResultKind.INVALID_EVIDENCE for result in mandatory_results):
         return True
-    if acceptable_results and not any(result.passed for result in acceptable_results):
-        return all(
-            result.kind is AssertionResultKind.INVALID_EVIDENCE for result in acceptable_results
-        )
-    return False
+    if not acceptable_results:
+        return False
+    if selected_acceptable_result is not None:
+        return False
+    return any(result.kind is AssertionResultKind.INVALID_EVIDENCE for result in acceptable_results)
 
 
 def _missing_required_evidence(case: ConversationCase, observation: Mapping[str, Any]) -> list[str]:
@@ -334,24 +374,37 @@ def _flatten_results(
     required_results: Sequence[AssertionResult],
     forbidden_results: Sequence[AssertionResult],
     expected_results: Sequence[AssertionResult],
-    acceptable_results: Sequence[AcceptableOutcomeResult],
+    selected_acceptable_result: AcceptableOutcomeResult | None,
 ) -> dict[str, AssertionResult]:
-    flattened: dict[str, AssertionResult] = {}
-    for result in [*required_results, *forbidden_results, *expected_results]:
-        flattened[result.assertion_id] = result
-    for outcome_result in acceptable_results:
-        for result in outcome_result.assertion_results:
-            flattened[result.assertion_id] = result
-    return flattened
+    return _strict_result_map(
+        [
+            *required_results,
+            *forbidden_results,
+            *expected_results,
+            *(
+                ()
+                if selected_acceptable_result is None
+                else selected_acceptable_result.assertion_results
+            ),
+        ]
+    )
 
 
-def _raw_score(
-    partial_credit: Sequence[Any],
+def calculate_raw_score(
+    partial_credit: Sequence[ScoreComponent],
     all_results: Mapping[str, AssertionResult],
 ) -> float:
     total = 0
     for component in partial_credit:
         assertion_ids = tuple(component.assertion_ids)
+        missing_ids = [
+            assertion_id for assertion_id in assertion_ids if assertion_id not in all_results
+        ]
+        if missing_ids:
+            missing_text = ", ".join(missing_ids)
+            raise EvaluatorConfigurationError(
+                f"unknown partial_credit assertion id: {missing_text}"
+            )
         if all(all_results[assertion_id].passed for assertion_id in assertion_ids):
             total += component.points
     return max(0.0, min(100.0, float(total)))
@@ -361,7 +414,7 @@ def _build_violations(
     required_results: Sequence[AssertionResult],
     forbidden_results: Sequence[AssertionResult],
     expected_results: Sequence[AssertionResult],
-    acceptable_results: Sequence[AcceptableOutcomeResult],
+    selected_acceptable_result: AcceptableOutcomeResult | None,
 ) -> Iterable[Violation]:
     for result in [*required_results, *expected_results]:
         if result.policy_id and result.severity in {"C0", "C1", "C2", "C3"} and not result.passed:
@@ -375,26 +428,21 @@ def _build_violations(
                 policy_id=result.policy_id,
                 severity=cast(Severity, result.severity),
             )
-    for outcome_result in acceptable_results:
-        if outcome_result.passed:
-            continue
-        for result in outcome_result.assertion_results:
-            if (
-                result.policy_id
-                and result.severity in {"C0", "C1", "C2", "C3"}
-                and not result.passed
-            ):
-                yield Violation(
-                    policy_id=result.policy_id,
-                    severity=cast(Severity, result.severity),
-                )
+    if selected_acceptable_result is None:
+        return
+    for result in selected_acceptable_result.assertion_results:
+        if result.policy_id and result.severity in {"C0", "C1", "C2", "C3"} and not result.passed:
+            yield Violation(
+                policy_id=result.policy_id,
+                severity=cast(Severity, result.severity),
+            )
 
 
 def _human_review_flags(
     required_results: Sequence[AssertionResult],
     forbidden_results: Sequence[AssertionResult],
     expected_results: Sequence[AssertionResult],
-    acceptable_results: Sequence[AcceptableOutcomeResult],
+    selected_acceptable_result: AcceptableOutcomeResult | None,
     violations: Sequence[Violation],
 ) -> tuple[HumanReviewFlag, ...]:
     flags: dict[tuple[str, str, str | None], HumanReviewFlag] = {}
@@ -411,7 +459,7 @@ def _human_review_flags(
         required_results,
         forbidden_results,
         expected_results,
-        acceptable_results,
+        selected_acceptable_result,
     ):
         if result.source != "judge" or not isinstance(result.actual, str):
             continue
@@ -432,10 +480,22 @@ def _iter_all_results(
     required_results: Sequence[AssertionResult],
     forbidden_results: Sequence[AssertionResult],
     expected_results: Sequence[AssertionResult],
-    acceptable_results: Sequence[AcceptableOutcomeResult],
+    selected_acceptable_result: AcceptableOutcomeResult | None,
 ) -> Iterable[AssertionResult]:
     yield from required_results
     yield from forbidden_results
     yield from expected_results
-    for outcome_result in acceptable_results:
-        yield from outcome_result.assertion_results
+    if selected_acceptable_result is not None:
+        yield from selected_acceptable_result.assertion_results
+
+
+def _strict_result_map(results: Sequence[AssertionResult]) -> dict[str, AssertionResult]:
+    flattened: dict[str, AssertionResult] = {}
+    for result in results:
+        existing = flattened.get(result.assertion_id)
+        if existing is not None:
+            raise EvaluatorConfigurationError(
+                f"duplicate assertion result id in scoring scope: {result.assertion_id}"
+            )
+        flattened[result.assertion_id] = result
+    return flattened
