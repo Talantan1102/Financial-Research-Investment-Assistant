@@ -368,6 +368,58 @@ def test_all_complete_evidence_failed_alternatives_produce_valid_task_failure(
     assert result.task_pass is False
 
 
+def test_failed_acceptable_outcome_assertions_remain_available_for_partial_credit(
+    policy_registry: PolicyRegistry,
+) -> None:
+    case = make_case(
+        acceptable_outcomes=[
+            AcceptableOutcome(
+                name_zh="partially completed path",
+                assertions=[
+                    AssertionSpec(
+                        assertion_id="answer-explains-state",
+                        source="answer",
+                        operator="contains",
+                        path="text",
+                        expected="current state",
+                    ),
+                    AssertionSpec(
+                        assertion_id="answer-explains-risk",
+                        source="answer",
+                        operator="contains",
+                        path="text",
+                        expected="risk",
+                    ),
+                ],
+            )
+        ],
+        partial_credit=[
+            ScoreComponent(
+                name_zh="state explained",
+                points=40,
+                assertion_ids=["answer-explains-state"],
+            ),
+            ScoreComponent(
+                name_zh="risk explained",
+                points=60,
+                assertion_ids=["answer-explains-risk"],
+            ),
+        ],
+    )
+
+    result = evaluate_trial(
+        case,
+        observation=base_observation(),
+        policy_registry=policy_registry,
+        policy_as_of=date(2026, 7, 27),
+    )
+
+    assert result.trial_status == TrialStatus.VALID
+    assert result.task_pass is False
+    assert result.raw_score == 40
+    assert result.task_score == 40
+
+
 def test_missing_evidence_needed_by_all_alternatives_invalidates_trial(
     policy_registry: PolicyRegistry,
 ) -> None:

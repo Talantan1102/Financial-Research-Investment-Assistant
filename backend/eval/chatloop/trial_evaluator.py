@@ -239,7 +239,7 @@ def evaluate_trial(
             required_results,
             forbidden_results,
             expected_results,
-            passing_acceptable_results,
+            acceptable_results,
         )
         _validate_triggered_escalation_mapping(all_results, escalation_map)
         raw_score = calculate_raw_score(case.partial_credit, all_results)
@@ -410,7 +410,7 @@ def _flatten_results(
     required_results: Sequence[AssertionResult],
     forbidden_results: Sequence[AssertionResult],
     expected_results: Sequence[AssertionResult],
-    passing_acceptable_results: Sequence[AcceptableOutcomeResult],
+    acceptable_results: Sequence[AcceptableOutcomeResult],
 ) -> dict[str, AssertionResult]:
     return _strict_result_map(
         [
@@ -419,7 +419,7 @@ def _flatten_results(
             *expected_results,
             *[
                 result
-                for acceptable_result in passing_acceptable_results
+                for acceptable_result in acceptable_results
                 for result in acceptable_result.assertion_results
             ],
         ]
