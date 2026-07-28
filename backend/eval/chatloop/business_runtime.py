@@ -178,36 +178,46 @@ def _build_components(
     recorder: ChatloopEvalRecorder,
     versions: dict[str, str],
 ) -> BusinessExecutor:
-    del plans
     from app.services.openai_client import build_llm_service_from_env
 
-    calibration_path = os.getenv("CHATLOOP_JUDGE_CALIBRATION_PATH")
-    if not calibration_path:
-        raise RuntimeError(
-            "CHATLOOP_JUDGE_CALIBRATION_PATH is required before the business semantic judge can run"
+    effective_versions = dict(versions)
+    gate: JudgeCalibrationGate | None = None
+    if _plans_require_semantic_judge(plans):
+        calibration_path = os.getenv("CHATLOOP_JUDGE_CALIBRATION_PATH")
+        if not calibration_path:
+            raise RuntimeError(
+                "CHATLOOP_JUDGE_CALIBRATION_PATH is required before the business semantic judge can run"
+            )
+        gate = JudgeCalibrationGate.from_jsonl(
+            calibration_path,
+            expected_identity={
+                "judge_model": versions["model"],
+                "judge_prompt_sha256": SEMANTIC_JUDGE_PROMPT_SHA256,
+                "rubric_version": SEMANTIC_JUDGE_RUBRIC_VERSION,
+            },
         )
-    gate = JudgeCalibrationGate.from_jsonl(
-        calibration_path,
-        expected_identity={
-            "judge_model": versions["model"],
-            "judge_prompt_sha256": SEMANTIC_JUDGE_PROMPT_SHA256,
-            "rubric_version": SEMANTIC_JUDGE_RUBRIC_VERSION,
-        },
-    )
-    gate.require_calibrated()
-    calibration_kappa = gate.result.cohen_kappa
-    if calibration_kappa is None:  # defensive: calibrated gates require a defined kappa
-        raise RuntimeError("business semantic judge calibration kappa is undefined")
+        gate.require_calibrated()
+        calibration_kappa = gate.result.cohen_kappa
+        if calibration_kappa is None:  # defensive: calibrated gates require a defined kappa
+            raise RuntimeError("business semantic judge calibration kappa is undefined")
+        effective_versions.update(
+            {
+                "judge_calibration_sha256": sha256(Path(calibration_path).read_bytes()).hexdigest(),
+                "judge_calibration_samples": str(gate.result.sample_count),
+                "judge_calibration_kappa": f"{calibration_kappa:.6f}",
+                "judge_calibration_agreement": f"{gate.result.agreement:.6f}",
+                "judge_prompt_sha256": SEMANTIC_JUDGE_PROMPT_SHA256,
+                "judge_rubric_version": SEMANTIC_JUDGE_RUBRIC_VERSION,
+            }
+        )
     llm = build_llm_service_from_env()
-    effective_versions = {
-        **versions,
-        "judge_calibration_sha256": sha256(Path(calibration_path).read_bytes()).hexdigest(),
-        "judge_calibration_samples": str(gate.result.sample_count),
-        "judge_calibration_kappa": f"{calibration_kappa:.6f}",
-        "judge_calibration_agreement": f"{gate.result.agreement:.6f}",
-        "judge_prompt_sha256": SEMANTIC_JUDGE_PROMPT_SHA256,
-        "judge_rubric_version": SEMANTIC_JUDGE_RUBRIC_VERSION,
-    }
+    semantic_judge: LLMSemanticEvidenceJudge | None = None
+    if gate is not None:
+        semantic_judge = LLMSemanticEvidenceJudge(
+            llm=llm,
+            judge_model=versions["model"],
+            calibration_gate=gate,
+        )
     manager = CaseEnvironmentManager(runtime)
     runner = BusinessRunner(
         manager,
@@ -220,11 +230,7 @@ def _build_components(
     )
     provider = BusinessStructuredEvidenceProvider(
         versions=effective_versions,
-        semantic_judge=LLMSemanticEvidenceJudge(
-            llm=llm,
-            judge_model=versions["model"],
-            calibration_gate=gate,
-        ),
+        semantic_judge=semantic_judge,
     )
     artifact_root = Path(
         os.getenv(
@@ -244,6 +250,27 @@ def _build_components(
         run_id=run_id,
         base_random_seed=int(os.getenv("CHATLOOP_EVAL_BASE_SEED", "20260728")),
     )
+
+
+def _plans_require_semantic_judge(plans: Sequence[BusinessCasePlan]) -> bool:
+    for plan in plans:
+        case = plan.case
+        assertions = (
+            *case.required_assertions,
+            *case.forbidden_outcomes,
+            *case.expected_state_changes,
+            *(
+                assertion
+                for outcome in case.acceptable_outcomes
+                for assertion in outcome.assertions
+            ),
+        )
+        if any(
+            assertion.source == "judge" and assertion.operator != "absent"
+            for assertion in assertions
+        ):
+            return True
+    return False
 
 
 def _catalog_for_plans():

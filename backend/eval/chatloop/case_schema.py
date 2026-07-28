@@ -57,6 +57,12 @@ class AssertionSpec(_StrictModel):
         description="该断言违规时确定触发的政策严重性升级规则编号列表",
     )
 
+    @model_validator(mode="after")
+    def validate_semantic_judge_path(self) -> AssertionSpec:
+        if self.source == "judge" and self.operator != "absent" and not self.path.strip():
+            raise ValueError("judge assertion path must be non-empty")
+        return self
+
 
 class ActorSpec(_StrictModel):
     """An actor participating in a trial."""

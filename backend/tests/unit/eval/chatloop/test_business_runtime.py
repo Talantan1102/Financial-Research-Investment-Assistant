@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from app.services import openai_client
+from eval.chatloop import business_runtime
 from eval.chatloop.business_cli import BusinessCasePlan, BusinessTrialOutcome
 from eval.chatloop.business_runtime import ProductionBusinessExecutor
 from eval.chatloop.case_loader import load_catalog
+from eval.chatloop.case_schema import AcceptableOutcome, AssertionSpec
 
 
 class FakeRuntime:
@@ -14,6 +19,9 @@ class FakeRuntime:
         self.cleanup_error = cleanup_error
         self.database_name = "fria_eval_fake"
         self.closed = False
+        self.async_session_factory = object()
+        self.sync_session_factory = object()
+        self.subprocess_env: dict[str, str] = {}
 
     async def aclose(self) -> None:
         if self.cleanup_error is not None:
@@ -53,6 +61,215 @@ class FakePlanExecutor:
 
 def _plan() -> BusinessCasePlan:
     return BusinessCasePlan(case=load_catalog().by_id("B1-01"), trial_count=1)
+
+
+def _assertion(*, source: str, operator: str = "equals") -> AssertionSpec:
+    return AssertionSpec.model_validate(
+        {
+            "assertion_id": f"test-{source}-{operator}",
+            "source": source,
+            "operator": operator,
+            "path": "quality.result",
+            "expected": "pass",
+        }
+    )
+
+
+def _plan_with_assertions(
+    *required: AssertionSpec,
+    acceptable: tuple[AssertionSpec, ...] = (),
+) -> BusinessCasePlan:
+    case = (
+        load_catalog()
+        .by_id("B1-01")
+        .model_copy(
+            update={
+                "required_assertions": list(required),
+                "forbidden_outcomes": [],
+                "expected_state_changes": [],
+                "acceptable_outcomes": (
+                    [AcceptableOutcome(name_zh="测试允许结果", assertions=list(acceptable))]
+                    if acceptable
+                    else []
+                ),
+            }
+        )
+    )
+    return BusinessCasePlan(case=case, trial_count=1)
+
+
+def _build_test_components(
+    monkeypatch: pytest.MonkeyPatch,
+    plans: Sequence[BusinessCasePlan],
+) -> dict[str, Any]:
+    captured: dict[str, Any] = {}
+
+    def capture_provider(*, versions: dict[str, str], semantic_judge: object | None) -> object:
+        captured["provider_versions"] = dict(versions)
+        captured["semantic_judge"] = semantic_judge
+        return object()
+
+    def capture_plan_executor(**kwargs: Any) -> object:
+        captured["executor_versions"] = dict(kwargs["versions"])
+        captured["evidence_provider"] = kwargs["evidence_provider"]
+        return object()
+
+    monkeypatch.setattr(business_runtime, "CaseEnvironmentManager", lambda _runtime: object())
+    monkeypatch.setattr(business_runtime, "BusinessStructuredEvidenceProvider", capture_provider)
+    monkeypatch.setattr(business_runtime, "BusinessPlanExecutor", capture_plan_executor)
+    captured["executor"] = business_runtime._build_components(
+        runtime=FakeRuntime(),
+        run_id="run-components-test",
+        plans=plans,
+        recorder=FakeRecorder(),
+        versions={
+            "case": "test-cases",
+            "policy": "test-policy",
+            "evaluator": "test-evaluator",
+            "model": "test-model",
+            "prompt_sha256": "test-prompt",
+            "git_sha": "test-git",
+        },
+    )
+    return captured
+
+
+def test_deterministic_only_components_do_not_require_judge_calibration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("CHATLOOP_JUDGE_CALIBRATION_PATH", raising=False)
+    built_llms: list[object] = []
+    monkeypatch.setattr(
+        openai_client,
+        "build_llm_service_from_env",
+        lambda: built_llms.append(object()) or built_llms[-1],
+    )
+
+    captured = _build_test_components(
+        monkeypatch,
+        [_plan_with_assertions(_assertion(source="answer", operator="exists"))],
+    )
+
+    assert captured["semantic_judge"] is None
+    assert built_llms, "the Agent still requires its production LLM service"
+    assert not any(key.startswith("judge_") for key in captured["provider_versions"])
+
+
+def test_absent_judge_assertion_does_not_require_judge_calibration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("CHATLOOP_JUDGE_CALIBRATION_PATH", raising=False)
+    monkeypatch.setattr(openai_client, "build_llm_service_from_env", object)
+
+    captured = _build_test_components(
+        monkeypatch,
+        [_plan_with_assertions(_assertion(source="judge", operator="absent"))],
+    )
+
+    assert captured["semantic_judge"] is None
+
+
+def test_judge_assertion_requires_calibration_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("CHATLOOP_JUDGE_CALIBRATION_PATH", raising=False)
+    llm_builds: list[object] = []
+    monkeypatch.setattr(
+        openai_client,
+        "build_llm_service_from_env",
+        lambda: llm_builds.append(object()),
+    )
+
+    with pytest.raises(RuntimeError, match="CHATLOOP_JUDGE_CALIBRATION_PATH is required"):
+        _build_test_components(
+            monkeypatch,
+            [_plan_with_assertions(_assertion(source="judge"))],
+        )
+    assert llm_builds == []
+
+
+def test_mixed_plans_require_calibration_when_acceptable_outcome_uses_judge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("CHATLOOP_JUDGE_CALIBRATION_PATH", raising=False)
+    monkeypatch.setattr(openai_client, "build_llm_service_from_env", object)
+    deterministic = _plan_with_assertions(_assertion(source="tools", operator="exists"))
+    semantic = _plan_with_assertions(acceptable=(_assertion(source="judge"),))
+
+    with pytest.raises(RuntimeError, match="CHATLOOP_JUDGE_CALIBRATION_PATH is required"):
+        _build_test_components(monkeypatch, [deterministic, semantic])
+
+
+@pytest.mark.parametrize(
+    "assertion_field",
+    ["required_assertions", "forbidden_outcomes", "expected_state_changes"],
+)
+def test_each_top_level_assertion_group_can_require_semantic_judge(
+    assertion_field: str,
+) -> None:
+    case = (
+        load_catalog()
+        .by_id("B1-01")
+        .model_copy(
+            update={
+                "required_assertions": [],
+                "forbidden_outcomes": [],
+                "expected_state_changes": [],
+                "acceptable_outcomes": [],
+                assertion_field: [_assertion(source="judge")],
+            }
+        )
+    )
+
+    assert business_runtime._plans_require_semantic_judge(
+        [BusinessCasePlan(case=case, trial_count=1)]
+    )
+
+
+def test_calibrated_judge_keeps_identity_checks_and_provenance(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    calibration_path = tmp_path / "judge-calibration.jsonl"
+    calibration_path.write_text("calibrated\n", encoding="utf-8")
+    monkeypatch.setenv("CHATLOOP_JUDGE_CALIBRATION_PATH", str(calibration_path))
+    monkeypatch.setattr(openai_client, "build_llm_service_from_env", object)
+    calibration_events: dict[str, Any] = {}
+
+    class FakeGate:
+        result = SimpleNamespace(cohen_kappa=0.8, sample_count=30, agreement=0.9)
+
+        def require_calibrated(self) -> None:
+            calibration_events["required"] = True
+
+    class FakeGateFactory:
+        @staticmethod
+        def from_jsonl(path: str, *, expected_identity: dict[str, str]) -> FakeGate:
+            calibration_events["path"] = path
+            calibration_events["identity"] = expected_identity
+            return FakeGate()
+
+    monkeypatch.setattr(business_runtime, "JudgeCalibrationGate", FakeGateFactory)
+
+    captured = _build_test_components(
+        monkeypatch,
+        [_plan_with_assertions(_assertion(source="judge"))],
+    )
+
+    versions = captured["provider_versions"]
+    assert captured["semantic_judge"] is not None
+    assert calibration_events == {
+        "path": str(calibration_path),
+        "identity": {
+            "judge_model": "test-model",
+            "judge_prompt_sha256": business_runtime.SEMANTIC_JUDGE_PROMPT_SHA256,
+            "rubric_version": business_runtime.SEMANTIC_JUDGE_RUBRIC_VERSION,
+        },
+        "required": True,
+    }
+    assert versions["judge_calibration_samples"] == "30"
+    assert versions["judge_calibration_kappa"] == "0.800000"
+    assert versions["judge_calibration_agreement"] == "0.900000"
 
 
 @pytest.mark.asyncio

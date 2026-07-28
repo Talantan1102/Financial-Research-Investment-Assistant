@@ -7,7 +7,7 @@ from typing import Any
 
 import eval.chatloop.case_schema as case_schema
 import pytest
-from eval.chatloop.case_schema import ConversationCase, SuiteType
+from eval.chatloop.case_schema import AssertionSpec, ConversationCase, SuiteType
 from pydantic import BaseModel, ValidationError
 
 
@@ -99,6 +99,40 @@ def test_trial_count_rejects_numeric_string() -> None:
 
     with pytest.raises(ValidationError, match="trial_count"):
         ConversationCase.model_validate(raw)
+
+
+@pytest.mark.parametrize("path", ["", "   "])
+def test_non_absent_judge_assertion_rejects_empty_path(path: str) -> None:
+    with pytest.raises(ValidationError, match="judge assertion path must be non-empty"):
+        AssertionSpec(
+            assertion_id="judge-empty-path",
+            source="judge",
+            operator="equals",
+            path=path,
+            expected="pass",
+        )
+
+
+def test_non_absent_judge_assertion_accepts_non_empty_path() -> None:
+    assertion = AssertionSpec(
+        assertion_id="judge-valid-path",
+        source="judge",
+        operator="equals",
+        path="quality.result",
+        expected="pass",
+    )
+
+    assert assertion.path == "quality.result"
+
+
+def test_absent_judge_assertion_accepts_empty_path() -> None:
+    assertion = AssertionSpec(
+        assertion_id="judge-absent-root",
+        source="judge",
+        operator="absent",
+    )
+
+    assert assertion.path == ""
 
 
 @pytest.mark.parametrize(
