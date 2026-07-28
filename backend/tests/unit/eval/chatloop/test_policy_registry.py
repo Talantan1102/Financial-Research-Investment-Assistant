@@ -14,6 +14,7 @@ from eval.chatloop.policy_registry import (
     PolicyNotFoundError,
     PolicyRegistry,
     PolicyRegistryError,
+    PolicySeverityError,
     PolicyVersionError,
     UnknownSeverityError,
     Violation,
@@ -59,6 +60,24 @@ def test_apply_caps_rejects_unregistered_policy(registry: PolicyRegistry) -> Non
 
     with pytest.raises(PolicyNotFoundError, match="UNKNOWN-POLICY"):
         registry.apply_caps(raw_score=92, violations=[violation])
+
+
+def test_registry_rejects_severity_that_downgrades_policy(registry: PolicyRegistry) -> None:
+    violation = Violation(policy_id="TRADE-CONFIRM", severity="C3")
+
+    with pytest.raises(PolicySeverityError, match="TRADE-CONFIRM"):
+        registry.apply_caps(raw_score=92, violations=[violation])
+
+
+def test_triggered_escalation_computes_effective_severity(registry: PolicyRegistry) -> None:
+    violation = Violation(
+        policy_id="TRADE-SESSION",
+        severity="C0",
+        triggered_escalations=["TRADING-WRONG-EXECUTION"],
+    )
+
+    assert registry.effective_severity(violation, as_of=date(2026, 7, 27)) == "C0"
+    assert registry.apply_caps(raw_score=92, violations=[violation]) == 0
 
 
 def test_q_deduction_is_not_a_cap_and_score_is_clamped() -> None:
@@ -110,6 +129,13 @@ def test_duplicate_policy_version_is_rejected() -> None:
 
     with pytest.raises(PolicyRegistryError, match="duplicate"):
         PolicyRegistry(duplicate)
+
+
+def test_duplicate_json_object_key_is_rejected() -> None:
+    raw = '{"schema_version":1,"schema_version":1}'
+
+    with pytest.raises(PolicyRegistryError, match="duplicate JSON key: schema_version"):
+        PolicyRegistry.from_json(raw)
 
 
 def test_policy_models_reject_unknown_fields() -> None:

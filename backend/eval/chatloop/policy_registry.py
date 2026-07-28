@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import math
 from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
@@ -38,6 +39,7 @@ __all__ = [
     "PolicyRecord",
     "PolicyRegistry",
     "PolicyRegistryError",
+    "PolicySeverityError",
     "PolicySource",
     "PolicyVersionError",
     "UnknownSeverityError",
@@ -59,6 +61,10 @@ class PolicyVersionError(PolicyRegistryError):
     """Raised when a requested policy version is absent or not effective."""
 
 
+class PolicySeverityError(PolicyRegistryError):
+    """Raised when a reported severity disagrees with the policy rules."""
+
+
 class UnknownSeverityError(PolicyRegistryError):
     """Raised when a violation severity has no approved strict cap."""
 
@@ -78,6 +84,7 @@ class PolicySource(_StrictModel):
 class EscalationRule(_StrictModel):
     """A condition that makes a policy violation more severe."""
 
+    rule_id: PolicyId = Field(description="严重性升级条件的稳定编号")
     when_zh: str = Field(description="触发严重性升级的中文条件")
     severity: Severity = Field(description="升级后采用的违规严重性")
 
@@ -152,6 +159,9 @@ class Violation(_StrictModel):
 
     policy_id: PolicyId = Field(description="被违反的政策编号")
     severity: Severity = Field(description="本次违规经过升级规则后的严重性")
+    triggered_escalations: list[PolicyId] = Field(
+        default_factory=list, description="本次违规实际触发的严重性升级条件编号"
+    )
 
 
 def score_cap(severity: str) -> int:
@@ -255,7 +265,16 @@ class PolicyRegistry:
     def default(cls) -> PolicyRegistry:
         """Load the packaged version-one policy catalog."""
         raw = cls.default_catalog_path().read_text(encoding="utf-8")
-        return cls(PolicyCatalog.model_validate_json(raw))
+        return cls.from_json(raw)
+
+    @classmethod
+    def from_json(cls, raw: str) -> PolicyRegistry:
+        """Parse a catalog while rejecting ambiguous duplicate JSON keys."""
+        try:
+            data = json.loads(raw, object_pairs_hook=_object_without_duplicate_keys)
+        except json.JSONDecodeError as exc:
+            raise PolicyRegistryError(f"invalid policy JSON: {exc.msg}") from exc
+        return cls(PolicyCatalog.model_validate(data))
 
     def resolve(
         self,
@@ -295,9 +314,56 @@ class PolicyRegistry:
         raw_score: float,
         violations: Sequence[Violation],
         q_deductions: float = 0,
+        as_of: date = date.max,
+        version: str | None = None,
     ) -> float:
         """Apply quality deductions followed by the strictest violation cap."""
-        for violation in violations:
-            if violation.policy_id not in self._by_id:
-                raise PolicyNotFoundError(f"unknown policy: {violation.policy_id}")
-        return final_score(raw_score, q_deductions, violations)
+        validated = [
+            violation.model_copy(
+                update={
+                    "severity": self.effective_severity(
+                        violation,
+                        as_of=as_of,
+                        version=version,
+                    )
+                }
+            )
+            for violation in violations
+        ]
+        return final_score(raw_score, q_deductions, validated)
+
+    def effective_severity(
+        self,
+        violation: Violation,
+        *,
+        as_of: date = date.max,
+        version: str | None = None,
+    ) -> Severity:
+        """Compute severity from policy defaults and triggered escalation rules."""
+        record = self.resolve(violation.policy_id, as_of=as_of, version=version)
+        rules = {rule.rule_id: rule for rule in record.escalation_rules}
+        unknown = set(violation.triggered_escalations) - set(rules)
+        if unknown:
+            unknown_text = ", ".join(sorted(unknown))
+            raise PolicySeverityError(
+                f"unknown escalation rule for {violation.policy_id}: {unknown_text}"
+            )
+        candidates: list[Severity] = [record.base_severity]
+        candidates.extend(rules[rule_id].severity for rule_id in violation.triggered_escalations)
+        effective = min(candidates, key=score_cap)
+        if violation.severity != effective:
+            raise PolicySeverityError(
+                f"severity mismatch for {violation.policy_id}: "
+                f"reported {violation.severity}, effective {effective}"
+            )
+        return effective
+
+
+def _object_without_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Build one JSON object and fail instead of applying last-key-wins."""
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise PolicyRegistryError(f"duplicate JSON key: {key}")
+        result[key] = value
+    return result
