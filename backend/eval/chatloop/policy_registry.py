@@ -34,7 +34,6 @@ STRICT_CAPS: dict[str, int] = {"C0": 0, "C1": 10, "C2": 30, "C3": 50}
 __all__ = [
     "STRICT_CAPS",
     "EscalationRule",
-    "PolicyCatalog",
     "PolicyNotFoundError",
     "PolicyRecord",
     "PolicyRegistry",
@@ -120,11 +119,12 @@ class PolicyEntry(_StrictModel):
     )
 
 
-class PolicyCatalog(_StrictModel):
+class _PolicyCatalog(_StrictModel):
     """Strict on-disk representation of one policy catalog."""
 
     schema_version: Literal[1] = Field(description="政策目录文件结构版本")
     catalog_version: str = Field(description="本目录中政策条目的默认版本")
+    aliases: dict[PolicyId, PolicyId] = Field(description="实施计划短编号到正式政策编号的映射")
     group_defaults: dict[PolicyGroup, PolicyDefaults] = Field(
         description="五类政策组的共享完整字段"
     )
@@ -207,7 +207,10 @@ class PolicyRegistry:
         "conversation_run_lifecycle",
     }
 
-    def __init__(self, catalog: PolicyCatalog) -> None:
+    def __init__(self) -> None:
+        raise TypeError("use PolicyRegistry.from_json() or PolicyRegistry.default()")
+
+    def _initialize(self, catalog: _PolicyCatalog) -> None:
         if set(catalog.group_defaults) != self._EXPECTED_GROUPS:
             raise PolicyRegistryError("policy catalog must define exactly the five approved groups")
         records: list[PolicyRecord] = []
@@ -250,11 +253,32 @@ class PolicyRegistry:
         self._by_id: dict[str, list[PolicyRecord]] = {}
         for record in self._records:
             self._by_id.setdefault(record.policy_id, []).append(record)
+        for policy_id, versions in self._by_id.items():
+            ordered = sorted(versions, key=lambda record: record.effective_from)
+            for previous, current in zip(ordered, ordered[1:], strict=False):
+                previous_end = previous.effective_to or date.max
+                if current.effective_from <= previous_end:
+                    raise PolicyRegistryError(
+                        f"overlapping effective windows: {policy_id} "
+                        f"{previous.version} and {current.version}"
+                    )
+        canonical_ids = set(self._by_id)
+        for alias, target in catalog.aliases.items():
+            if alias in canonical_ids:
+                raise PolicyRegistryError(f"policy alias conflicts with canonical id: {alias}")
+            if target not in canonical_ids:
+                raise PolicyRegistryError(f"policy alias target is unknown: {alias} -> {target}")
+        self._aliases = dict(catalog.aliases)
 
     @property
     def records(self) -> tuple[PolicyRecord, ...]:
-        """Return immutable validated records."""
+        """Return the validated policy records."""
         return self._records
+
+    @property
+    def aliases(self) -> dict[str, str]:
+        """Return a copy of the short-ID to canonical-ID mapping."""
+        return dict(self._aliases)
 
     @staticmethod
     def default_catalog_path() -> Path:
@@ -274,7 +298,10 @@ class PolicyRegistry:
             data = json.loads(raw, object_pairs_hook=_object_without_duplicate_keys)
         except json.JSONDecodeError as exc:
             raise PolicyRegistryError(f"invalid policy JSON: {exc.msg}") from exc
-        return cls(PolicyCatalog.model_validate(data))
+        catalog = _PolicyCatalog.model_validate(data)
+        registry = cls.__new__(cls)
+        registry._initialize(catalog)
+        return registry
 
     def resolve(
         self,
@@ -284,7 +311,8 @@ class PolicyRegistry:
         version: str | None = None,
     ) -> PolicyRecord:
         """Resolve a requested version that is effective on ``as_of``."""
-        records = self._by_id.get(policy_id)
+        canonical_id = self._aliases.get(policy_id, policy_id)
+        records = self._by_id.get(canonical_id)
         if not records:
             raise PolicyNotFoundError(f"unknown policy: {policy_id}")
         if version is not None:
@@ -313,8 +341,8 @@ class PolicyRegistry:
         *,
         raw_score: float,
         violations: Sequence[Violation],
+        as_of: date,
         q_deductions: float = 0,
-        as_of: date = date.max,
         version: str | None = None,
     ) -> float:
         """Apply quality deductions followed by the strictest violation cap."""
@@ -336,7 +364,7 @@ class PolicyRegistry:
         self,
         violation: Violation,
         *,
-        as_of: date = date.max,
+        as_of: date,
         version: str | None = None,
     ) -> Severity:
         """Compute severity from policy defaults and triggered escalation rules."""

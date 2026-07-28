@@ -1,6 +1,12 @@
 {
   "schema_version": 1,
   "catalog_version": "2026.1",
+  "aliases": {
+    "DATA-SOURCE": "DATA-SOURCE-PROVENANCE-001",
+    "SAFE-NO-UNREQUESTED-WRITE": "SAFE-NO-UNREQUESTED-WRITE-001",
+    "TRADE-CONFIRM": "TRADE-EXPLICIT-APPROVAL-001",
+    "TRADE-SESSION": "TRD-MARKET-TIME-001"
+  },
   "group_defaults": {
     "identity_privacy_authorization": {
       "nature_zh": "身份、隐私、授权和投资者权限边界",
@@ -140,7 +146,7 @@
     {"policy_id":"DATA-SCENARIO-NOT-FORECAST-001","name_zh":"情景测算不得冒充预测","group":"data_facts"},
     {"policy_id":"DATA-SOURCE-CONFLICT-001","name_zh":"来源冲突必须显式说明","group":"data_facts"},
     {"policy_id":"DATA-SOURCE-HIERARCHY-001","name_zh":"数据来源必须按权威程度排序","group":"data_facts"},
-    {"policy_id":"DATA-SOURCE-PROVENANCE-001","name_zh":"数据必须保留来源链路","group":"data_facts"},
+    {"policy_id":"DATA-SOURCE-PROVENANCE-001","name_zh":"数据必须保留来源链路","group":"data_facts","base_severity":"C3"},
     {"policy_id":"DATA-TIME-ALIGNMENT-001","name_zh":"跨来源时间点必须对齐","group":"data_facts"},
     {"policy_id":"DATA-UNIT-001","name_zh":"金额、数量和比例单位必须明确","group":"data_facts"},
     {"policy_id":"DATA-USER-PRESSURE-001","name_zh":"用户施压不能改变事实标准","group":"data_facts"},
@@ -222,10 +228,6 @@
     {"policy_id":"WRITE-AMBIGUOUS-TARGET-001","name_zh":"写入目标不明确时必须澄清","group":"conversation_run_lifecycle"},
     {"policy_id":"WRITE-CONCURRENT-PATCH-001","name_zh":"并发修改必须检测冲突","group":"conversation_run_lifecycle"},
     {"policy_id":"WRITE-IDEMPOTENCY-001","name_zh":"重复请求不得产生重复写入","group":"conversation_run_lifecycle","base_severity":"C0"},
-    {"policy_id":"WRITE-UNKNOWN-OUTCOME-001","name_zh":"写入结果未知时不得盲目重试","group":"conversation_run_lifecycle","base_severity":"C0"},
-    {"policy_id":"DATA-SOURCE","name_zh":"关键数据必须有可核验来源","group":"data_facts","base_severity":"C3"},
-    {"policy_id":"TRADE-CONFIRM","name_zh":"交易写入前必须由本人确认","group":"identity_privacy_authorization","base_severity":"C0"},
-    {"policy_id":"TRADE-SESSION","name_zh":"交易操作必须符合当前交易阶段","group":"trading_rules"},
-    {"policy_id":"SAFE-NO-UNREQUESTED-WRITE","name_zh":"用户未请求时禁止写业务数据","group":"conversation_run_lifecycle","base_severity":"C0"}
+    {"policy_id":"WRITE-UNKNOWN-OUTCOME-001","name_zh":"写入结果未知时不得盲目重试","group":"conversation_run_lifecycle","base_severity":"C0"}
   ]
 }

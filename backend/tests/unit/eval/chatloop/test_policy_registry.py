@@ -7,10 +7,10 @@ import re
 from datetime import date
 from pathlib import Path
 
+import eval.chatloop.policy_registry as policy_registry_module
 import pytest
 from eval.chatloop.policy_registry import (
     STRICT_CAPS,
-    PolicyCatalog,
     PolicyNotFoundError,
     PolicyRegistry,
     PolicyRegistryError,
@@ -52,21 +52,21 @@ def test_multiple_violations_take_lowest_cap(registry: PolicyRegistry) -> None:
         Violation(policy_id="TRADE-CONFIRM", severity="C0"),
     ]
 
-    assert registry.apply_caps(raw_score=92, violations=violations) == 0
+    assert registry.apply_caps(raw_score=92, violations=violations, as_of=date(2026, 7, 27)) == 0
 
 
 def test_apply_caps_rejects_unregistered_policy(registry: PolicyRegistry) -> None:
     violation = Violation(policy_id="UNKNOWN-POLICY", severity="C0")
 
     with pytest.raises(PolicyNotFoundError, match="UNKNOWN-POLICY"):
-        registry.apply_caps(raw_score=92, violations=[violation])
+        registry.apply_caps(raw_score=92, violations=[violation], as_of=date(2026, 7, 27))
 
 
 def test_registry_rejects_severity_that_downgrades_policy(registry: PolicyRegistry) -> None:
     violation = Violation(policy_id="TRADE-CONFIRM", severity="C3")
 
     with pytest.raises(PolicySeverityError, match="TRADE-CONFIRM"):
-        registry.apply_caps(raw_score=92, violations=[violation])
+        registry.apply_caps(raw_score=92, violations=[violation], as_of=date(2026, 7, 27))
 
 
 def test_triggered_escalation_computes_effective_severity(registry: PolicyRegistry) -> None:
@@ -77,7 +77,14 @@ def test_triggered_escalation_computes_effective_severity(registry: PolicyRegist
     )
 
     assert registry.effective_severity(violation, as_of=date(2026, 7, 27)) == "C0"
-    assert registry.apply_caps(raw_score=92, violations=[violation]) == 0
+    assert registry.apply_caps(raw_score=92, violations=[violation], as_of=date(2026, 7, 27)) == 0
+
+
+def test_cap_application_requires_explicit_policy_date(registry: PolicyRegistry) -> None:
+    violation = Violation(policy_id="TRADE-CONFIRM", severity="C0")
+
+    with pytest.raises(TypeError, match="as_of"):
+        registry.apply_caps(raw_score=92, violations=[violation])  # type: ignore[call-arg]
 
 
 def test_q_deduction_is_not_a_cap_and_score_is_clamped() -> None:
@@ -122,13 +129,21 @@ def test_unknown_policy_and_version_raise_domain_errors(registry: PolicyRegistry
 
 
 def test_duplicate_policy_version_is_rejected() -> None:
-    catalog = PolicyCatalog.model_validate_json(
-        PolicyRegistry.default_catalog_path().read_text("utf-8")
-    )
-    duplicate = catalog.model_copy(update={"policies": [*catalog.policies, catalog.policies[0]]})
+    raw = json.loads(PolicyRegistry.default_catalog_path().read_text("utf-8"))
+    raw["policies"].append(raw["policies"][0])
 
     with pytest.raises(PolicyRegistryError, match="duplicate"):
-        PolicyRegistry(duplicate)
+        PolicyRegistry.from_json(json.dumps(raw, ensure_ascii=False))
+
+
+def test_overlapping_effective_windows_are_rejected() -> None:
+    raw = json.loads(PolicyRegistry.default_catalog_path().read_text("utf-8"))
+    overlapping = dict(raw["policies"][0])
+    overlapping["version"] = "2027.1"
+    raw["policies"].append(overlapping)
+
+    with pytest.raises(PolicyRegistryError, match="overlapping"):
+        PolicyRegistry.from_json(json.dumps(raw, ensure_ascii=False))
 
 
 def test_duplicate_json_object_key_is_rejected() -> None:
@@ -143,7 +158,14 @@ def test_policy_models_reject_unknown_fields() -> None:
     raw["policies"][0]["risk_level"] = "最高风险"
 
     with pytest.raises(ValidationError, match="risk_level"):
-        PolicyCatalog.model_validate(raw)
+        PolicyRegistry.from_json(json.dumps(raw, ensure_ascii=False))
+
+
+def test_strict_json_loader_is_the_only_public_construction_path() -> None:
+    assert "PolicyCatalog" not in policy_registry_module.__all__
+
+    with pytest.raises(TypeError):
+        PolicyRegistry(object())  # type: ignore[call-arg]
 
 
 def test_registry_has_all_groups_and_required_sources(registry: PolicyRegistry) -> None:
@@ -213,4 +235,20 @@ def test_every_approved_case_policy_is_registered(registry: PolicyRegistry) -> N
     registered = {record.policy_id for record in registry.records}
 
     assert len(approved) == 136
-    assert approved <= registered
+    assert registered == approved
+
+
+def test_plan_short_ids_are_aliases_not_duplicate_policy_records(
+    registry: PolicyRegistry,
+) -> None:
+    assert registry.aliases == {
+        "DATA-SOURCE": "DATA-SOURCE-PROVENANCE-001",
+        "SAFE-NO-UNREQUESTED-WRITE": "SAFE-NO-UNREQUESTED-WRITE-001",
+        "TRADE-CONFIRM": "TRADE-EXPLICIT-APPROVAL-001",
+        "TRADE-SESSION": "TRD-MARKET-TIME-001",
+    }
+    assert (
+        registry.resolve("TRADE-SESSION", as_of=date(2026, 7, 27), version="2026.1").policy_id
+        == "TRD-MARKET-TIME-001"
+    )
+    assert len(registry.records) == 136
