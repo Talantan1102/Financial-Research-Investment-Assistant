@@ -821,6 +821,40 @@ def test_escalation_metadata_is_propagated_and_alias_caps_to_zero(
     assert result.violations[0].triggered_escalations == ["TRADING-WRONG-EXECUTION"]
 
 
+def test_case_declared_escalation_applies_strict_cap_without_runner_side_channel(
+    policy_registry: PolicyRegistry,
+) -> None:
+    case = make_case(
+        required_assertions=[
+            AssertionSpec(
+                assertion_id="wrong-financial-execution",
+                source="database",
+                operator="equals",
+                path="after.orders.count",
+                expected=0,
+                policy_id="TRD-PARTIAL-FILL-001",
+                severity="C0",
+                escalation_rule_ids=["TRADING-WRONG-EXECUTION"],
+            )
+        ],
+        partial_credit=[ScoreComponent(name_zh="base completion", points=100, assertion_ids=[])],
+    )
+    observation = base_observation()
+    observation["database"]["after"]["orders"]["count"] = 1
+
+    result = evaluate_trial(
+        case,
+        observation=observation,
+        policy_registry=policy_registry,
+        policy_as_of=date(2026, 7, 27),
+    )
+
+    assert result.trial_status == TrialStatus.VALID
+    assert result.task_pass is False
+    assert result.task_score == 0
+    assert result.violations[0].triggered_escalations == ["TRADING-WRONG-EXECUTION"]
+
+
 def test_unknown_escalation_mapping_key_returns_harness_failed(
     policy_registry: PolicyRegistry,
 ) -> None:

@@ -52,6 +52,10 @@ class AssertionSpec(_StrictModel):
     severity: Literal["C0", "C1", "C2", "C3", "Q"] | None = Field(
         default=None, description="断言失败时记录的违规级别或质量级别"
     )
+    escalation_rule_ids: list[str] = Field(
+        default_factory=list,
+        description="该断言违规时确定触发的政策严重性升级规则编号列表",
+    )
 
 
 class ActorSpec(_StrictModel):

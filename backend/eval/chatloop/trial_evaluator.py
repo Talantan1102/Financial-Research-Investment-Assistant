@@ -126,7 +126,7 @@ def evaluate_trial(
     assertion_engine: AssertionEngine | None = None,
 ) -> TrialEvaluation:
     engine = assertion_engine or AssertionEngine()
-    escalation_map = (
+    runtime_escalation_map = (
         {}
         if triggered_escalations_by_assertion is None
         else dict(triggered_escalations_by_assertion)
@@ -232,6 +232,13 @@ def evaluate_trial(
         and not any(result.passed for result in forbidden_results)
         and all(result.passed for result in expected_results)
         and acceptable_pass
+    )
+    escalation_map = _merge_case_declared_escalations(
+        case,
+        required_results,
+        forbidden_results,
+        expected_results,
+        runtime_escalation_map,
     )
 
     try:
@@ -548,7 +555,16 @@ def _strict_result_map(results: Sequence[AssertionResult]) -> dict[str, Assertio
 
 def _validate_case_assertion_ids(case: ConversationCase) -> None:
     seen: set[str] = set()
-    all_assertions = [
+    for assertion in _case_assertions(case):
+        if assertion.assertion_id in seen:
+            raise EvaluatorConfigurationError(
+                f"duplicate assertion id across case scope: {assertion.assertion_id}"
+            )
+        seen.add(assertion.assertion_id)
+
+
+def _case_assertions(case: ConversationCase) -> list[AssertionSpec]:
+    return [
         *case.required_assertions,
         *case.forbidden_outcomes,
         *case.expected_state_changes,
@@ -558,12 +574,29 @@ def _validate_case_assertion_ids(case: ConversationCase) -> None:
             for assertion in acceptable_outcome.assertions
         ],
     ]
-    for assertion in all_assertions:
-        if assertion.assertion_id in seen:
-            raise EvaluatorConfigurationError(
-                f"duplicate assertion id across case scope: {assertion.assertion_id}"
-            )
-        seen.add(assertion.assertion_id)
+
+
+def _merge_case_declared_escalations(
+    case: ConversationCase,
+    required_results: Sequence[AssertionResult],
+    forbidden_results: Sequence[AssertionResult],
+    expected_results: Sequence[AssertionResult],
+    runtime_escalations: Mapping[str, Sequence[str]],
+) -> dict[str, tuple[str, ...]]:
+    merged = {key: tuple(value) for key, value in runtime_escalations.items()}
+    violating_ids = {
+        result.assertion_id
+        for result in [*required_results, *expected_results]
+        if not result.passed
+    }
+    violating_ids.update(result.assertion_id for result in forbidden_results if result.passed)
+    assertions_by_id = {assertion.assertion_id: assertion for assertion in _case_assertions(case)}
+    for assertion_id in violating_ids:
+        declared = assertions_by_id[assertion_id].escalation_rule_ids
+        if not declared:
+            continue
+        merged[assertion_id] = tuple(dict.fromkeys([*merged.get(assertion_id, ()), *declared]))
+    return merged
 
 
 def _validate_triggered_escalation_mapping(
