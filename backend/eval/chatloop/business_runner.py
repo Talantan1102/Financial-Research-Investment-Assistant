@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal, Protocol
 
@@ -155,10 +156,20 @@ class BusinessRunner:
 class DurableHttpBusinessExecutor:
     """Execute a durable case with its trial JWT against the real Run API."""
 
-    def __init__(self, session_factory: Any, *, base_url: str, timeout_s: float = 60.0) -> None:
+    def __init__(
+        self,
+        session_factory: Any,
+        *,
+        base_url: str,
+        timeout_s: float = 60.0,
+        client_transport: Any | None = None,
+        progress_callback: Callable[[], Awaitable[Any]] | None = None,
+    ) -> None:
         self._session_factory = session_factory
         self._base_url = base_url
         self._timeout_s = timeout_s
+        self._client_transport = client_transport
+        self._progress_callback = progress_callback
 
     async def execute(self, context: BusinessExecutionContext) -> BusinessObservation:
         from eval.chatloop.sut_runner import DurableRunHttpTransport
@@ -170,6 +181,8 @@ class DurableHttpBusinessExecutor:
             base_url=self._base_url,
             timeout_s=self._timeout_s,
             batch_id=context.execution_id,
+            client_transport=self._client_transport,
+            progress_callback=self._progress_callback,
         )
         observed = await transport.execute_messages(
             case_id=context.case.case_id,
@@ -181,11 +194,13 @@ class DurableHttpBusinessExecutor:
             {
                 "tool_name": call.get("tool_name", "unknown"),
                 "arguments": dict(call.get("args") or {}),
-                "result": {
-                    "permission_decision": call.get("permission_decision"),
-                    "permission_decisions": call.get("permission_decisions", []),
-                },
-                "error": None,
+                "result": call.get("result") if call.get("status") == "completed" else None,
+                "error": call.get("error"),
+                "status": call.get("status"),
+                "error_code": call.get("error_code"),
+                "error_message": call.get("error_message"),
+                "permission_decision": call.get("permission_decision"),
+                "permission_decisions": call.get("permission_decisions", []),
                 "idempotency_key": call.get("tool_call_id"),
             }
             for call in observed.tool_calls
@@ -197,8 +212,12 @@ class DurableHttpBusinessExecutor:
             run_state=observed.run_state,
             evidence={
                 "response_text": observed.response_text,
+                "execution_path": "durable",
+                "run_id": observed.run_id,
                 "transport_fault": context.transport_fault.retry_policy,
             },
+            cost_cny=observed.cost_cny,
+            total_tokens=observed.total_tokens,
         )
 
 

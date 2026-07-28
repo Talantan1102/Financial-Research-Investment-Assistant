@@ -63,6 +63,8 @@ class TransportObservation:
     escalate_offered: bool
     run_state: dict[str, Any]
     evidence: str = ""
+    total_tokens: int = 0
+    cost_cny: float = 0.0
 
 
 class OutcomeTransport(Protocol):
@@ -205,8 +207,11 @@ class DurableRunHttpTransport:
                 pass
             elif status not in self._TERMINAL:
                 raise RuntimeError(f"outcome Run stopped in unexpected status {status}")
-        tool_calls, run_state, response_text = await self._read_trace(run_id)
+        tool_calls, run_state, response_text, total_tokens, cost_cny = await self._read_trace(
+            run_id
+        )
         run_state["status"] = status
+        run_state["usage"] = {"total_tokens": total_tokens, "cost_cny": cost_cny}
         run_state["observation"] = {"version": 1, "status": "collected"}
         return TransportObservation(
             run_id=run_id,
@@ -214,6 +219,8 @@ class DurableRunHttpTransport:
             response_text=response_text,
             escalate_offered=False,
             run_state=run_state,
+            total_tokens=total_tokens,
+            cost_cny=cost_cny,
         )
 
     async def execute_messages(
@@ -237,6 +244,8 @@ class DurableRunHttpTransport:
         session_id: str | None = None
         final_text = ""
         final_status = "queued"
+        total_tokens = 0
+        cost_cny = Decimal("0")
         lost_injected = False
         message_index = 0
 
@@ -295,9 +304,13 @@ class DurableRunHttpTransport:
                         lost_injected = True
                     final_status, pause = await self._wait(run_id)
 
-                calls, state, response_text = await self._read_trace(run_id)
+                calls, state, response_text, run_tokens, run_cost_cny = await self._read_trace(
+                    run_id
+                )
                 all_calls.extend(calls)
                 all_pauses.extend(state.get("pauses", []))
+                total_tokens += run_tokens
+                cost_cny += Decimal(str(run_cost_cny))
                 final_text = response_text
                 if response_text:
                     transcript.append({"role": "assistant", "content": response_text})
@@ -315,8 +328,14 @@ class DurableRunHttpTransport:
                 "pauses": all_pauses,
                 "transcript": transcript,
                 "response_lost_after_commit_injected": lost_injected,
+                "usage": {
+                    "total_tokens": total_tokens,
+                    "cost_cny": float(cost_cny),
+                },
                 "observation": {"version": 1, "status": "collected"},
             },
+            total_tokens=total_tokens,
+            cost_cny=float(cost_cny),
         )
 
     async def _preflight_identity(
@@ -437,9 +456,11 @@ class DurableRunHttpTransport:
             response["edited_arguments"] = edits
         return response
 
-    async def _read_trace(self, run_id: str) -> tuple[list[dict[str, Any]], dict[str, Any], str]:
+    async def _read_trace(
+        self, run_id: str
+    ) -> tuple[list[dict[str, Any]], dict[str, Any], str, int, float]:
         from app.models.run import Run, RunMessage, RunPause
-        from app.models.run_execution import RunToolExecution
+        from app.models.run_execution import RunToolExecution, RunUsageRecord
         from sqlalchemy import select
 
         async with self._session_factory() as session:
@@ -450,6 +471,13 @@ class DurableRunHttpTransport:
                     select(RunToolExecution)
                     .where(RunToolExecution.run_id == run.id)
                     .order_by(RunToolExecution.started_at, RunToolExecution.id)
+                )
+            ).all()
+            usage_rows = (
+                await session.scalars(
+                    select(RunUsageRecord)
+                    .where(RunUsageRecord.run_id == run.id)
+                    .order_by(RunUsageRecord.created_at, RunUsageRecord.id)
                 )
             ).all()
             pauses = (
@@ -489,6 +517,20 @@ class DurableRunHttpTransport:
                 decisions = list(pause_permissions.get(call_id, []))
                 if not decisions or decisions[-1] != final_decision:
                     decisions.append(final_decision)
+                status = str(row.status)
+                result_summary = (
+                    dict(row.result_summary) if isinstance(row.result_summary, dict) else None
+                )
+                result = (
+                    result_summary.get("output")
+                    if status == "completed" and result_summary is not None
+                    else None
+                )
+                error_code = None if row.error_code is None else str(row.error_code)
+                error_message = None if row.error_message is None else str(row.error_message)
+                error = None
+                if status == "failed":
+                    error = error_message or error_code or "tool execution failed"
                 calls.append(
                     {
                         "tool_call_id": call_id,
@@ -497,6 +539,12 @@ class DurableRunHttpTransport:
                         "risk_level": str(row.risk_level),
                         "permission_decision": final_decision,
                         "permission_decisions": decisions,
+                        "status": status,
+                        "result": result,
+                        "result_summary": result_summary,
+                        "error": error,
+                        "error_code": error_code,
+                        "error_message": error_message,
                     }
                 )
             for pause in pauses:
@@ -534,6 +582,12 @@ class DurableRunHttpTransport:
                                     call_id,
                                     [str(decision)] if decision is not None else [],
                                 ),
+                                "status": "approval_required",
+                                "result": None,
+                                "result_summary": None,
+                                "error": None,
+                                "error_code": None,
+                                "error_message": None,
                             }
                         )
                         seen_call_ids.add(call_id)
@@ -546,6 +600,12 @@ class DurableRunHttpTransport:
                             "risk_level": request.get("risk_level"),
                             "permission_decision": request.get("permission_decision"),
                             "permission_decisions": [request.get("permission_decision")],
+                            "status": "approval_required",
+                            "result": None,
+                            "result_summary": None,
+                            "error": None,
+                            "error_code": None,
+                            "error_message": None,
                         }
                     )
             pause_trace = [self._pause_trace(row) for row in pauses]
@@ -553,6 +613,11 @@ class DurableRunHttpTransport:
                 None
                 if run.final_message_id is None
                 else await session.get(RunMessage, run.final_message_id)
+            )
+            total_tokens = sum(int(row.total_tokens) for row in usage_rows)
+            total_cost_cny = sum(
+                (Decimal(str(row.cost_cny)) for row in usage_rows),
+                Decimal("0"),
             )
             return (
                 calls,
@@ -567,6 +632,8 @@ class DurableRunHttpTransport:
                     },
                 },
                 "" if final is None else str(final.content),
+                total_tokens,
+                float(total_cost_cny),
             )
 
     @staticmethod

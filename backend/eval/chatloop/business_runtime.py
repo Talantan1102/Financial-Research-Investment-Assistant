@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 import time
 from collections.abc import Callable, Sequence
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
+import httpx
 from sqlalchemy.engine import URL
 
 from eval.chatloop.artifact_store import ArtifactStore
@@ -20,12 +22,16 @@ from eval.chatloop.business_cli import (
 )
 from eval.chatloop.business_pipeline import BusinessPlanExecutor
 from eval.chatloop.business_runner import (
-    BusinessExecutionContext,
-    BusinessObservation,
     BusinessRunner,
     DirectToolLoopBusinessExecutor,
+    DurableHttpBusinessExecutor,
 )
 from eval.chatloop.disposable_runtime import DisposableEvalRuntime, RuntimeCleanupError
+from eval.chatloop.durable_runtime import (
+    AsyncCleanup,
+    DurableResourceFactory,
+    InProcessDurableDriver,
+)
 from eval.chatloop.environment import CaseEnvironmentManager
 from eval.chatloop.judge_calibration import JudgeCalibrationGate
 from eval.chatloop.policy_registry import PolicyRegistry
@@ -41,12 +47,6 @@ RuntimeFactory = Callable[..., Any]
 RecorderFactory = Callable[[], Any]
 ComponentBuilder = Callable[..., BusinessExecutor]
 HistoryExporter = Callable[[], Any]
-
-
-class _UnavailableDurableExecutor:
-    async def execute(self, context: BusinessExecutionContext) -> BusinessObservation:
-        del context
-        raise RuntimeError("durable stack isolation was not preflighted")
 
 
 class ProductionBusinessExecutor:
@@ -235,6 +235,14 @@ def _build_components(
             judge_model=versions["model"],
             calibration_gate=gate,
         )
+    durable_driver = InProcessDurableDriver.lazy(
+        runtime.async_session_factory,
+        resource_factory=_durable_resource_factory(runtime=runtime, llm=llm),
+    )
+    runtime.bind_durable_driver(durable_driver)
+    from app.processes.run_api import create_run_api_app
+
+    run_api = create_run_api_app(session_factory=runtime.async_session_factory)
     manager = CaseEnvironmentManager(runtime)
     runner = BusinessRunner(
         manager,
@@ -243,7 +251,13 @@ def _build_components(
             sync_session_factory=runtime.sync_session_factory,
             subprocess_env=runtime.subprocess_env,
         ),
-        durable_executor=_UnavailableDurableExecutor(),
+        durable_executor=DurableHttpBusinessExecutor(
+            runtime.async_session_factory,
+            base_url="http://run-api",
+            timeout_s=float(os.getenv("CHATLOOP_EVAL_RUN_TIMEOUT_S", "60")),
+            client_transport=httpx.ASGITransport(app=run_api),
+            progress_callback=durable_driver.advance,
+        ),
     )
     provider = BusinessStructuredEvidenceProvider(
         versions=effective_versions,
@@ -267,6 +281,61 @@ def _build_components(
         run_id=run_id,
         base_random_seed=int(os.getenv("CHATLOOP_EVAL_BASE_SEED", "20260728")),
     )
+
+
+def _durable_resource_factory(
+    *,
+    runtime: DisposableEvalRuntime,
+    llm: Any,
+) -> DurableResourceFactory:
+    async def build() -> tuple[Any, AsyncCleanup]:
+        return await _build_durable_worker_resources(runtime=runtime, llm=llm)
+
+    return build
+
+
+async def _build_durable_worker_resources(
+    *,
+    runtime: DisposableEvalRuntime,
+    llm: Any,
+) -> tuple[Any, AsyncCleanup]:
+    """Open the real MCP/ChatLoop worker stack with all-or-nothing cleanup."""
+    from app.chatloop.worker_wiring import build_heavy_singletons
+    from app.services.mcp_client import MCPClient
+    from app.services.run_chat_worker import (
+        build_chat_executor_builder,
+        load_tool_risk_policy,
+        resolve_llm_identity,
+    )
+
+    mcp_context = MCPClient.from_subprocess(
+        profile="chat_tools",
+        env_overrides=runtime.subprocess_env,
+    )
+    mcp_client = await mcp_context.__aenter__()
+    try:
+        singletons = await build_heavy_singletons(
+            session_factory=runtime.async_session_factory,
+            sync_session_factory=runtime.sync_session_factory,
+            mcp_client=mcp_client,
+            llm=llm,
+            memory=object(),
+        )
+        provider, model = resolve_llm_identity(llm)
+        executor_builder = build_chat_executor_builder(
+            singletons,
+            provider=provider,
+            model=model,
+            risk_policy=load_tool_risk_policy(os.environ),
+        )
+    except BaseException:
+        await mcp_context.__aexit__(*sys.exc_info())
+        raise
+
+    async def cleanup() -> None:
+        await mcp_context.__aexit__(None, None, None)
+
+    return executor_builder, cleanup
 
 
 def _plans_require_semantic_judge(plans: Sequence[BusinessCasePlan]) -> bool:

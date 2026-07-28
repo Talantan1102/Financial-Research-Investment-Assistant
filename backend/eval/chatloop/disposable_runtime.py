@@ -174,7 +174,7 @@ class DisposableEvalRuntime:
             raise RuntimeError("runtime cleanup is already in progress")
         self.state = RuntimeState.CLOSING
         failures: list[tuple[str, BaseException]] = []
-        if self._durable_driver is not None and self._durable_driver.is_open:
+        if self._durable_driver is not None:
             try:
                 await self._durable_driver.aclose()
             except BaseException as exc:

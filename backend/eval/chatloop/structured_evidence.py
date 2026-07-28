@@ -473,17 +473,28 @@ def _project_tools(ledger: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             "error": deepcopy(row.get("error")),
             "idempotency_key": deepcopy(row.get("idempotency_key")),
             "fault_injection": deepcopy(row.get("fault_injection")),
+            "status": deepcopy(row.get("status")),
+            "error_code": deepcopy(row.get("error_code")),
+            "error_message": deepcopy(row.get("error_message")),
         }
         calls.append(call)
         names.append(name)
         grouped.setdefault(name, []).append(call)
-        result = row.get("result")
-        if isinstance(result, Mapping):
-            values = result.get("permission_decisions")
-            if isinstance(values, Sequence) and not isinstance(values, (str, bytes, bytearray)):
-                permissions.setdefault(name, []).extend(deepcopy(list(values)))
-            elif "permission_decision" in result:
-                permissions.setdefault(name, []).append(deepcopy(result["permission_decision"]))
+        values = row.get("permission_decisions")
+        if isinstance(values, Sequence) and not isinstance(values, (str, bytes, bytearray)):
+            permissions.setdefault(name, []).extend(deepcopy(list(values)))
+        elif "permission_decision" in row:
+            permissions.setdefault(name, []).append(deepcopy(row["permission_decision"]))
+        else:
+            result = row.get("result")
+            if isinstance(result, Mapping):
+                legacy_values = result.get("permission_decisions")
+                if isinstance(legacy_values, Sequence) and not isinstance(
+                    legacy_values, (str, bytes, bytearray)
+                ):
+                    permissions.setdefault(name, []).extend(deepcopy(list(legacy_values)))
+                elif "permission_decision" in result:
+                    permissions.setdefault(name, []).append(deepcopy(result["permission_decision"]))
 
     projected: dict[str, Any] = {
         "calls": calls,

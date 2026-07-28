@@ -23,6 +23,10 @@ class FakeRuntime:
         self.async_session_factory = object()
         self.sync_session_factory = object()
         self.subprocess_env: dict[str, str] = {}
+        self.durable_driver: object | None = None
+
+    def bind_durable_driver(self, driver: object) -> None:
+        self.durable_driver = driver
 
     async def aclose(self) -> None:
         if self.cleanup_error is not None:
@@ -113,6 +117,7 @@ def _build_test_components(
     def capture_plan_executor(**kwargs: Any) -> object:
         captured["executor_versions"] = dict(kwargs["versions"])
         captured["evidence_provider"] = kwargs["evidence_provider"]
+        captured["runner"] = kwargs["runner"]
         return object()
 
     monkeypatch.setattr(business_runtime, "CaseEnvironmentManager", lambda _runtime: object())
@@ -154,6 +159,152 @@ def test_deterministic_only_components_do_not_require_judge_calibration(
     assert captured["semantic_judge"] is None
     assert built_llms, "the Agent still requires its production LLM service"
     assert not any(key.startswith("judge_") for key in captured["provider_versions"])
+
+
+def test_components_bind_lazy_real_durable_executor_without_starting_resources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("CHATLOOP_JUDGE_CALIBRATION_PATH", raising=False)
+
+    class FakeLLM:
+        provider = "scripted"
+        default_model = "scripted-v1"
+
+    monkeypatch.setattr(openai_client, "build_llm_service_from_env", FakeLLM)
+    runtime = FakeRuntime()
+    mcp_starts: list[str] = []
+    monkeypatch.setattr(
+        business_runtime,
+        "_build_durable_worker_resources",
+        lambda **_kwargs: mcp_starts.append("started"),
+    )
+    captured: dict[str, Any] = {}
+
+    monkeypatch.setattr(business_runtime, "CaseEnvironmentManager", lambda _runtime: object())
+    monkeypatch.setattr(
+        business_runtime,
+        "BusinessStructuredEvidenceProvider",
+        lambda **_kwargs: object(),
+    )
+
+    def capture_plan_executor(**kwargs: Any) -> object:
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(business_runtime, "BusinessPlanExecutor", capture_plan_executor)
+    business_runtime._build_components(
+        runtime=runtime,
+        run_id="run-lazy-durable",
+        plans=[_plan_with_assertions(_assertion(source="answer", operator="exists"))],
+        recorder=FakeRecorder(),
+        versions={
+            "case": "test-cases",
+            "policy": "test-policy",
+            "evaluator": "test-evaluator",
+            "model": "test-model",
+            "prompt_sha256": "test-prompt",
+            "git_sha": "test-git",
+        },
+    )
+
+    assert runtime.durable_driver is not None
+    assert runtime.durable_driver.is_open
+    assert runtime.durable_driver.is_started is False
+    assert mcp_starts == []
+    assert isinstance(
+        captured["runner"]._executors["durable"],
+        business_runtime.DurableHttpBusinessExecutor,
+    )
+
+
+@pytest.mark.asyncio
+async def test_durable_resource_build_failure_exits_mcp_and_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.chatloop import worker_wiring
+    from app.services.mcp_client import MCPClient
+
+    events: list[str] = []
+
+    class FailingMCPContext:
+        async def __aenter__(self) -> object:
+            events.append("enter")
+            return object()
+
+        async def __aexit__(self, *_args: object) -> None:
+            events.append("exit")
+
+    monkeypatch.setattr(
+        MCPClient,
+        "from_subprocess",
+        lambda **_kwargs: FailingMCPContext(),
+    )
+
+    async def fail_singletons(**_kwargs: object) -> object:
+        raise RuntimeError("singleton build failed")
+
+    monkeypatch.setattr(worker_wiring, "build_heavy_singletons", fail_singletons)
+    runtime = FakeRuntime()
+
+    class FakeLLM:
+        provider = "scripted"
+        default_model = "scripted-v1"
+
+    driver = business_runtime.InProcessDurableDriver.lazy(
+        runtime.async_session_factory,
+        resource_factory=business_runtime._durable_resource_factory(
+            runtime=runtime,
+            llm=FakeLLM(),
+        ),
+    )
+    runtime.bind_durable_driver(driver)
+
+    with pytest.raises(RuntimeError, match="singleton build failed"):
+        await driver.start()
+
+    assert events == ["enter", "exit"]
+    assert driver.is_open is False
+    assert driver.is_started is False
+    await driver.aclose()
+
+
+@pytest.mark.asyncio
+async def test_durable_resource_cleanup_exits_successfully_started_mcp(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.chatloop import worker_wiring
+    from app.services.mcp_client import MCPClient
+
+    events: list[str] = []
+
+    class MCPContext:
+        async def __aenter__(self) -> object:
+            events.append("enter")
+            return object()
+
+        async def __aexit__(self, *_args: object) -> None:
+            events.append("exit")
+
+    monkeypatch.setattr(MCPClient, "from_subprocess", lambda **_kwargs: MCPContext())
+
+    async def build_singletons(**_kwargs: object) -> object:
+        return object()
+
+    monkeypatch.setattr(worker_wiring, "build_heavy_singletons", build_singletons)
+
+    class FakeLLM:
+        provider = "scripted"
+        default_model = "scripted-v1"
+
+    _builder, cleanup = await business_runtime._build_durable_worker_resources(
+        runtime=FakeRuntime(),
+        llm=FakeLLM(),
+    )
+    assert events == ["enter"]
+
+    await cleanup()
+
+    assert events == ["enter", "exit"]
 
 
 def test_absent_judge_assertion_does_not_require_judge_calibration(
