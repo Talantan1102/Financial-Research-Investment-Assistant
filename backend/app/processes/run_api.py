@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
+from typing import Any
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
@@ -25,6 +26,11 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         await engine.dispose()
+
+
+@asynccontextmanager
+async def _bound_session_lifespan(_app: FastAPI):
+    yield
 
 
 app = FastAPI(title="Run Control API", lifespan=lifespan)
@@ -71,3 +77,26 @@ async def healthz(request: Request) -> dict[str, str]:
     async with request.app.state.async_session_factory() as session:
         await session.execute(text("SELECT 1"))
     return {"status": "ok"}
+
+
+def create_run_api_app(*, session_factory: Any | None = None) -> FastAPI:
+    """Build an isolated Run API app without mutating the process-global app."""
+
+    app_lifespan = lifespan if session_factory is None else _bound_session_lifespan
+
+    isolated = FastAPI(title="Run Control API", lifespan=app_lifespan)
+    if session_factory is not None:
+        isolated.state.async_session_factory = session_factory
+    isolated.include_router(runs_router)
+    isolated.dependency_overrides[get_current_user_required] = _run_control_actor
+    isolated.add_api_route("/auth/me", get_run_control_actor, methods=["GET"])
+    isolated.add_api_route(
+        "/api/v1/tenants",
+        list_run_control_actor_tenants,
+        methods=["GET"],
+    )
+    isolated.add_api_route("/healthz", healthz, methods=["GET"])
+    return isolated
+
+
+__all__ = ["app", "create_run_api_app"]

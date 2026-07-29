@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -702,11 +703,29 @@ def test_durable_transport_maps_interaction_to_real_resume_payload_and_trace() -
             pause_type="approval",
             request_payload=request,
             response_payload=response,
+            created_at=datetime(2026, 7, 28, 2, 0, tzinfo=UTC),
+            resolved_at=datetime(2026, 7, 28, 2, 11, tzinfo=UTC),
         )
     )
     assert trace["decision"] == "approved"
     assert trace["original"]["quantity"] == 100
     assert trace["effective"]["quantity"] == 200
+    assert trace["created_at"] == "2026-07-28T02:00:00+00:00"
+    assert trace["resolved_at"] == "2026-07-28T02:11:00+00:00"
+    assert trace["elapsed_seconds"] == 660
+
+    unresolved = DurableRunHttpTransport._pause_trace(
+        SimpleNamespace(
+            pause_type="approval",
+            request_payload=request,
+            response_payload=None,
+            created_at=datetime.now(UTC) - timedelta(seconds=660),
+            resolved_at=None,
+        )
+    )
+    assert unresolved["created_at"]
+    assert unresolved["resolved_at"] is None
+    assert "elapsed_seconds" not in unresolved
 
     rejected = DurableRunHttpTransport._resume_payload(
         _case("paper-buy-rejected"),

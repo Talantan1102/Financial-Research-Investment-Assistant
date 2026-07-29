@@ -16,14 +16,17 @@ k>1:同 case 跑 k 次(独立 request_id),供 pass^k。
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
+from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Protocol
 from uuid import UUID, uuid4
 
+from eval.chatloop.environment import EvalActor
 from eval.chatloop.scenario import Scenario
 
 logger = logging.getLogger(__name__)
@@ -61,6 +64,8 @@ class TransportObservation:
     escalate_offered: bool
     run_state: dict[str, Any]
     evidence: str = ""
+    total_tokens: int = 0
+    cost_cny: float = 0.0
 
 
 class OutcomeTransport(Protocol):
@@ -88,29 +93,82 @@ class OutcomeCollector(Protocol):
 
 
 class DurableRunHttpTransport:
-    """Drive the real Run API and read its durable RunPause/tool ledger."""
+    """Drive the real Run API and read its durable RunPause/tool ledger.
+
+    A progress callback is trusted evaluator code and must be cancellation-
+    cooperative: after receiving ``CancelledError`` it may perform bounded
+    cleanup, then it must finish or re-raise. Python cannot forcibly terminate
+    a coroutine that suppresses cancellation forever.
+    """
 
     _TERMINAL = frozenset({"completed", "failed", "cancelled"})
 
-    def __init__(self, session_factory: Any) -> None:
-        required = {
-            "base_url": os.getenv("CHATLOOP_EVAL_RUN_BASE_URL"),
-            "tenant_id": os.getenv("CHATLOOP_EVAL_TENANT_ID"),
-            "token": os.getenv("CHATLOOP_EVAL_AUTH_TOKEN"),
-            "user_id": os.getenv("CHATLOOP_EVAL_USER_ID"),
-        }
-        missing = [name for name, value in required.items() if not value]
-        if missing:
-            raise RuntimeError(
-                "outcome eval requires durable Run configuration: " + ", ".join(missing)
-            )
-        self._base_url = str(required["base_url"]).rstrip("/")
-        self._tenant_id = UUID(str(required["tenant_id"]))
-        self._token = str(required["token"])
-        self.user_id = str(UUID(str(required["user_id"])))
+    def __init__(
+        self,
+        session_factory: Any,
+        *,
+        actor: EvalActor | None = None,
+        tenant_id: UUID | str | None = None,
+        base_url: str | None = None,
+        timeout_s: float | None = None,
+        batch_id: str | None = None,
+        client_transport: Any | None = None,
+        progress_callback: Callable[[], Awaitable[Any]] | None = None,
+        approval_pause_callback: Callable[[str, Any], Awaitable[None]] | None = None,
+    ) -> None:
+        if actor is None:
+            required = {
+                "base_url": base_url or os.getenv("CHATLOOP_EVAL_RUN_BASE_URL"),
+                "tenant_id": tenant_id or os.getenv("CHATLOOP_EVAL_TENANT_ID"),
+                "token": os.getenv("CHATLOOP_EVAL_AUTH_TOKEN"),
+                "user_id": os.getenv("CHATLOOP_EVAL_USER_ID"),
+            }
+            missing = [name for name, value in required.items() if not value]
+            if missing:
+                raise RuntimeError(
+                    "outcome eval requires durable Run configuration: " + ", ".join(missing)
+                )
+            configured_token = str(required["token"])
+            configured_user_id = UUID(str(required["user_id"]))
+            configured_tenant_id = UUID(str(required["tenant_id"]))
+            configured_base_url = str(required["base_url"])
+        else:
+            if not actor.is_authenticated or actor.user_id is None or actor.token is None:
+                raise ValueError("durable eval transport requires an authenticated actor")
+            selected_tenant = tenant_id if tenant_id is not None else actor.tenant_id
+            if selected_tenant is None:
+                raise ValueError("durable eval transport requires a tenant")
+            if actor.tenant_id is not None and UUID(str(selected_tenant)) != actor.tenant_id:
+                raise ValueError("durable eval actor does not belong to the selected tenant")
+            configured_token = str(actor.token)
+            configured_user_id = actor.user_id
+            configured_tenant_id = UUID(str(selected_tenant))
+            configured_base_url = str(base_url or os.getenv("CHATLOOP_EVAL_RUN_BASE_URL", "") or "")
+            if not configured_base_url and client_transport is None:
+                raise ValueError("durable eval transport requires a Run API base URL")
+            if not configured_base_url:
+                configured_base_url = "http://run-api"
+
+        self._base_url = configured_base_url.rstrip("/")
+        self._tenant_id = configured_tenant_id
+        self._token = configured_token
+        self.user_id = str(configured_user_id)
         self._session_factory = session_factory
-        self._timeout_s = float(os.getenv("CHATLOOP_EVAL_RUN_TIMEOUT_S", "60"))
-        self._batch_id = uuid4().hex
+        self._timeout_s = (
+            float(timeout_s)
+            if timeout_s is not None
+            else float(os.getenv("CHATLOOP_EVAL_RUN_TIMEOUT_S", "60"))
+        )
+        self._batch_id = batch_id or uuid4().hex
+        self._actor = actor
+        self._client_transport = client_transport
+        self._progress_callback = progress_callback
+        self._approval_pause_callback = approval_pause_callback
+
+    @property
+    def actor(self) -> EvalActor | None:
+        """Return the trial-scoped identity, if this is not legacy env construction."""
+        return self._actor
 
     @property
     def tenant_id(self) -> str:
@@ -123,7 +181,11 @@ class DurableRunHttpTransport:
             "Authorization": f"Bearer {self._token}",
             "Idempotency-Key": f"eval:{self._batch_id}:{scenario.case_id}:{run_idx}",
         }
-        async with httpx.AsyncClient(base_url=self._base_url, timeout=10) as client:
+        async with httpx.AsyncClient(
+            base_url=self._base_url,
+            timeout=10,
+            transport=self._client_transport,
+        ) as client:
             await self._preflight_identity(client, headers)
             response = await client.post(
                 f"/api/v1/tenants/{self._tenant_id}/runs",
@@ -148,8 +210,11 @@ class DurableRunHttpTransport:
                 pass
             elif status not in self._TERMINAL:
                 raise RuntimeError(f"outcome Run stopped in unexpected status {status}")
-        tool_calls, run_state, response_text = await self._read_trace(run_id)
+        tool_calls, run_state, response_text, total_tokens, cost_cny = await self._read_trace(
+            run_id
+        )
         run_state["status"] = status
+        run_state["usage"] = {"total_tokens": total_tokens, "cost_cny": cost_cny}
         run_state["observation"] = {"version": 1, "status": "collected"}
         return TransportObservation(
             run_id=run_id,
@@ -157,6 +222,151 @@ class DurableRunHttpTransport:
             response_text=response_text,
             escalate_offered=False,
             run_state=run_state,
+            total_tokens=total_tokens,
+            cost_cny=cost_cny,
+        )
+
+    async def execute_messages(
+        self,
+        *,
+        case_id: str,
+        messages: list[str],
+        run_idx: int,
+        duplicate_approval_resume: bool = False,
+    ) -> TransportObservation:
+        """Drive a business-case message script through real Run API boundaries."""
+        import httpx
+
+        if not messages:
+            raise ValueError("business case must contain at least one user message")
+        headers = {"Authorization": f"Bearer {self._token}"}
+        transcript: list[dict[str, str]] = []
+        all_calls: list[dict[str, Any]] = []
+        all_pauses: list[dict[str, Any]] = []
+        run_ids: list[str] = []
+        session_id: str | None = None
+        final_text = ""
+        final_status = "queued"
+        final_outcome: dict[str, Any] | None = None
+        total_tokens = 0
+        cost_cny = Decimal("0")
+        duplicate_resume: dict[str, Any] = {"attempted": False, "status_code": None}
+        message_index = 0
+
+        async with httpx.AsyncClient(
+            base_url=self._base_url,
+            timeout=10,
+            transport=self._client_transport,
+        ) as client:
+            await self._preflight_identity(client, headers)
+            while message_index < len(messages):
+                prompt = messages[message_index]
+                transcript.append({"role": "user", "content": prompt})
+                body: dict[str, Any] = {"prompt": prompt}
+                if session_id is not None:
+                    body["session_id"] = session_id
+                created = await client.post(
+                    f"/api/v1/tenants/{self._tenant_id}/runs",
+                    headers={
+                        **headers,
+                        "Idempotency-Key": (
+                            f"eval:{self._batch_id}:{case_id}:{run_idx}:{message_index}"
+                        ),
+                    },
+                    json=body,
+                )
+                created.raise_for_status()
+                created_payload = created.json()
+                run_id = self._validated_created_run_id(created_payload)
+                session_id = str(UUID(str(created_payload["session_id"])))
+                run_ids.append(run_id)
+                message_index += 1
+                final_status, pause = await self._wait(run_id)
+
+                while pause is not None:
+                    if message_index >= len(messages):
+                        break
+                    reply = messages[message_index]
+                    transcript.append({"role": "user", "content": reply})
+                    if pause.pause_type == "input":
+                        resume_response: dict[str, Any] = {"text": reply}
+                    elif pause.pause_type == "approval":
+                        if self._approval_pause_callback is not None:
+                            try:
+                                await asyncio.wait_for(
+                                    self._approval_pause_callback(run_id, pause),
+                                    timeout=self._timeout_s,
+                                )
+                            except TimeoutError as exc:
+                                raise TimeoutError(
+                                    f"eval Run {run_id} approval-pause callback timed out"
+                                ) from exc
+                        resume_response = {
+                            "approved": _approval_from_message(reply),
+                            "text": reply,
+                        }
+                    else:
+                        raise RuntimeError(f"unsupported business pause type {pause.pause_type}")
+                    resumed = await client.post(
+                        f"/api/v1/tenants/{self._tenant_id}/runs/{run_id}/resume",
+                        headers=headers,
+                        json={"pause_id": str(pause.id), "response": resume_response},
+                    )
+                    resumed.raise_for_status()
+                    if duplicate_approval_resume and pause.pause_type == "approval":
+                        duplicate = await client.post(
+                            f"/api/v1/tenants/{self._tenant_id}/runs/{run_id}/resume",
+                            headers=headers,
+                            json={"pause_id": str(pause.id), "response": resume_response},
+                        )
+                        duplicate_resume = {
+                            "attempted": True,
+                            "status_code": duplicate.status_code,
+                        }
+                    message_index += 1
+                    final_status, pause = await self._wait(run_id)
+
+                calls, state, response_text, run_tokens, run_cost_cny = await self._read_trace(
+                    run_id
+                )
+                all_calls.extend(calls)
+                all_pauses.extend(state.get("pauses", []))
+                final_outcome = state.get("outcome")
+                total_tokens += run_tokens
+                cost_cny += Decimal(str(run_cost_cny))
+                final_text = response_text
+                if response_text:
+                    transcript.append({"role": "assistant", "content": response_text})
+                outcome_code = (
+                    final_outcome.get("code") if isinstance(final_outcome, dict) else None
+                )
+                if (
+                    pause is not None
+                    or outcome_code == "action_required"
+                    or _is_terminal_script_response(response_text)
+                ):
+                    break
+
+        return TransportObservation(
+            run_id=run_ids[-1],
+            tool_calls=all_calls,
+            response_text=final_text,
+            escalate_offered=False,
+            run_state={
+                "status": final_status,
+                "run_ids": run_ids,
+                "pauses": all_pauses,
+                "outcome": final_outcome,
+                "transcript": transcript,
+                "duplicate_approval_resume": duplicate_resume,
+                "usage": {
+                    "total_tokens": total_tokens,
+                    "cost_cny": float(cost_cny),
+                },
+                "observation": {"version": 1, "status": "collected"},
+            },
+            total_tokens=total_tokens,
+            cost_cny=float(cost_cny),
         )
 
     async def _preflight_identity(
@@ -244,7 +454,22 @@ class DurableRunHttpTransport:
                 )
                 if status in self._TERMINAL or pause is not None:
                     return status, pause
-            await asyncio.sleep(0.1)
+            if self._progress_callback is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                try:
+                    await asyncio.wait_for(
+                        self._progress_callback(),
+                        timeout=remaining,
+                    )
+                except TimeoutError as exc:
+                    raise TimeoutError(
+                        f"eval Run {run_id} progress callback exceeded remaining timeout"
+                    ) from exc
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                await asyncio.sleep(min(0.1, remaining))
         raise TimeoutError(f"eval Run {run_id} did not reach pause/terminal state")
 
     @staticmethod
@@ -262,9 +487,11 @@ class DurableRunHttpTransport:
             response["edited_arguments"] = edits
         return response
 
-    async def _read_trace(self, run_id: str) -> tuple[list[dict[str, Any]], dict[str, Any], str]:
+    async def _read_trace(
+        self, run_id: str
+    ) -> tuple[list[dict[str, Any]], dict[str, Any], str, int, float]:
         from app.models.run import Run, RunMessage, RunPause
-        from app.models.run_execution import RunToolExecution
+        from app.models.run_execution import RunToolExecution, RunUsageRecord
         from sqlalchemy import select
 
         async with self._session_factory() as session:
@@ -275,6 +502,13 @@ class DurableRunHttpTransport:
                     select(RunToolExecution)
                     .where(RunToolExecution.run_id == run.id)
                     .order_by(RunToolExecution.started_at, RunToolExecution.id)
+                )
+            ).all()
+            usage_rows = (
+                await session.scalars(
+                    select(RunUsageRecord)
+                    .where(RunUsageRecord.run_id == run.id)
+                    .order_by(RunUsageRecord.created_at, RunUsageRecord.id)
                 )
             ).all()
             pauses = (
@@ -314,6 +548,20 @@ class DurableRunHttpTransport:
                 decisions = list(pause_permissions.get(call_id, []))
                 if not decisions or decisions[-1] != final_decision:
                     decisions.append(final_decision)
+                status = str(row.status)
+                result_summary = (
+                    dict(row.result_summary) if isinstance(row.result_summary, dict) else None
+                )
+                result = (
+                    result_summary.get("output")
+                    if status == "completed" and result_summary is not None
+                    else None
+                )
+                error_code = None if row.error_code is None else str(row.error_code)
+                error_message = None if row.error_message is None else str(row.error_message)
+                error = None
+                if status == "failed":
+                    error = error_message or error_code or "tool execution failed"
                 calls.append(
                     {
                         "tool_call_id": call_id,
@@ -322,6 +570,12 @@ class DurableRunHttpTransport:
                         "risk_level": str(row.risk_level),
                         "permission_decision": final_decision,
                         "permission_decisions": decisions,
+                        "status": status,
+                        "result": result,
+                        "result_summary": result_summary,
+                        "error": error,
+                        "error_code": error_code,
+                        "error_message": error_message,
                     }
                 )
             for pause in pauses:
@@ -359,6 +613,12 @@ class DurableRunHttpTransport:
                                     call_id,
                                     [str(decision)] if decision is not None else [],
                                 ),
+                                "status": "approval_required",
+                                "result": None,
+                                "result_summary": None,
+                                "error": None,
+                                "error_code": None,
+                                "error_message": None,
                             }
                         )
                         seen_call_ids.add(call_id)
@@ -371,6 +631,12 @@ class DurableRunHttpTransport:
                             "risk_level": request.get("risk_level"),
                             "permission_decision": request.get("permission_decision"),
                             "permission_decisions": [request.get("permission_decision")],
+                            "status": "approval_required",
+                            "result": None,
+                            "result_summary": None,
+                            "error": None,
+                            "error_code": None,
+                            "error_message": None,
                         }
                     )
             pause_trace = [self._pause_trace(row) for row in pauses]
@@ -378,6 +644,11 @@ class DurableRunHttpTransport:
                 None
                 if run.final_message_id is None
                 else await session.get(RunMessage, run.final_message_id)
+            )
+            total_tokens = sum(int(row.total_tokens) for row in usage_rows)
+            total_cost_cny = sum(
+                (Decimal(str(row.cost_cny)) for row in usage_rows),
+                Decimal("0"),
             )
             return (
                 calls,
@@ -392,17 +663,25 @@ class DurableRunHttpTransport:
                     },
                 },
                 "" if final is None else str(final.content),
+                total_tokens,
+                float(total_cost_cny),
             )
 
     @staticmethod
     def _pause_trace(pause: Any) -> dict[str, Any]:
         response = dict(pause.response_payload or {})
         approved = response.get("approved")
+        created_at = pause.created_at
+        resolved_at = pause.resolved_at
         trace: dict[str, Any] = {
             "pause_type": str(pause.pause_type),
             "request": dict(pause.request_payload),
             "response": response,
+            "created_at": created_at.isoformat(),
+            "resolved_at": resolved_at.isoformat() if resolved_at is not None else None,
         }
+        if resolved_at is not None:
+            trace["elapsed_seconds"] = int((resolved_at - created_at).total_seconds())
         if type(approved) is bool:
             trace["decision"] = "approved" if approved else "rejected"
         calls = pause.request_payload.get("tool_calls", [])
@@ -421,8 +700,9 @@ class DurableRunHttpTransport:
 class SqlOutcomeCollector:
     """Capture user-owned paper/watchlist terminal facts around a durable Run."""
 
-    def __init__(self, session_factory: Any) -> None:
+    def __init__(self, session_factory: Any, *, actor: EvalActor | None = None) -> None:
         self._session_factory = session_factory
+        self._actor = actor
         self._batch_id = uuid4().hex
         self._active_lock: tuple[int, Any] | None = None
 
@@ -487,12 +767,16 @@ class SqlOutcomeCollector:
         scenario: Scenario,
         sample_key: str,
     ) -> None:
-        configured = os.getenv("CHATLOOP_EVAL_USER_ID")
-        if configured is None:
-            raise RuntimeError("CHATLOOP_EVAL_USER_ID is required for stateful eval setup")
         uid = UUID(user_id)
-        if uid != UUID(configured) or uid != UUID(_EVAL_USER_ID):
-            raise RuntimeError("stateful eval setup is restricted to the dedicated eval user")
+        if self._actor is not None:
+            if self._actor.user_id is None or uid != self._actor.user_id:
+                raise RuntimeError("stateful eval setup is restricted to the trial actor")
+        else:
+            configured = os.getenv("CHATLOOP_EVAL_USER_ID")
+            if configured is None:
+                raise RuntimeError("CHATLOOP_EVAL_USER_ID is required for stateful eval setup")
+            if uid != UUID(configured) or uid != UUID(_EVAL_USER_ID):
+                raise RuntimeError("stateful eval setup is restricted to the dedicated eval user")
         async with self._session_factory() as session, session.begin():
             await session.run_sync(
                 lambda sync_session: self._prepare_sync(
@@ -781,7 +1065,10 @@ async def run_scenarios(
         ordinary_scenarios = [scenario for scenario in scenarios if scenario.outcome is None]
         if outcome_scenarios:
             transport = outcome_transport or DurableRunHttpTransport(session_factory)
-            collector = outcome_collector or SqlOutcomeCollector(session_factory)
+            collector = outcome_collector or SqlOutcomeCollector(
+                session_factory,
+                actor=getattr(transport, "actor", None),
+            )
             for scenario in outcome_scenarios:
                 for run_idx in range(k):
                     try:
@@ -921,6 +1208,22 @@ async def run_scenarios(
         await engine.dispose()
 
     return results
+
+
+def _approval_from_message(message: str) -> bool:
+    normalized = "".join(message.lower().split())
+    negative = ("取消", "算了", "不确认", "不同意", "拒绝", "终止", "不要")
+    positive = ("确认", "同意", "批准", "继续", "可以", "好的", "好", "是")
+    if any(token in normalized for token in negative):
+        return False
+    if any(token in normalized for token in positive):
+        return True
+    raise RuntimeError("approval pause received an ambiguous scripted user message")
+
+
+def _is_terminal_script_response(response_text: str) -> bool:
+    normalized = response_text.lower()
+    return "action_required" in normalized or "需要您先完成" in response_text
 
 
 __all__ = [

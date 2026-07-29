@@ -1063,7 +1063,9 @@ async def test_exact_execution_id_is_required_to_approve_existing_ledger_row(
         )
     transport = object.__new__(DurableRunHttpTransport)
     transport._session_factory = pg_async_session_factory
-    calls, _run_state, _response = await transport._read_trace(str(assignment.run_id))
+    calls, _run_state, _response, _tokens, _cost = await transport._read_trace(
+        str(assignment.run_id)
+    )
     assert calls[0]["permission_decisions"] == ["approval_required", "approved"]
 
 
@@ -1124,7 +1126,9 @@ async def test_manual_reject_converges_exact_row_with_database_time(
         )
     transport = object.__new__(DurableRunHttpTransport)
     transport._session_factory = pg_async_session_factory
-    calls, _run_state, _response = await transport._read_trace(str(assignment.run_id))
+    calls, _run_state, _response, _tokens, _cost = await transport._read_trace(
+        str(assignment.run_id)
+    )
     assert calls[0]["permission_decisions"] == ["approval_required", "rejected"]
 
     with pytest.raises(AttemptCommandRejected, match="rejection provenance"):
@@ -1186,7 +1190,9 @@ async def test_eval_trace_fails_when_persisted_permission_decision_is_unknown(
 
     transport = object.__new__(DurableRunHttpTransport)
     transport._session_factory = pg_async_session_factory
-    calls, _run_state, _response = await transport._read_trace(str(assignment.run_id))
+    calls, _run_state, _response, _tokens, _cost = await transport._read_trace(
+        str(assignment.run_id)
+    )
     result = PaperTradingOutcomeScorer().score(
         {
             "version": 1,
@@ -1477,7 +1483,9 @@ async def test_completed_tool_result_is_reused_and_call_id_is_run_global(
     assert row.permission_decision == "direct"
     transport = object.__new__(DurableRunHttpTransport)
     transport._session_factory = pg_async_session_factory
-    calls, _run_state, _response = await transport._read_trace(str(assignment.run_id))
+    calls, _run_state, _response, _tokens, _cost = await transport._read_trace(
+        str(assignment.run_id)
+    )
     assert calls[0]["permission_decisions"] == ["direct"]
 
     with pytest.raises(ValueError, match="tool_call_id"):

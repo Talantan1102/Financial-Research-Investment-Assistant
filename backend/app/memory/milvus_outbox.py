@@ -95,6 +95,7 @@ async def try_milvus_insert(
     embed_service: Any,
     edge: ChatMemoryEdge,
     edge_text: str,
+    collection_name: str = "chat_memory_edge_embeddings",
 ) -> bool:
     """Try inline qwen embed + Milvus insert.
 
@@ -137,7 +138,7 @@ async def try_milvus_insert(
     try:
         # pymilvus collection.insert 接受 list of dict
         insert_call = milvus_client.insert(
-            collection_name="chat_memory_edge_embeddings",
+            collection_name=collection_name,
             data=[
                 {
                     "edge_id": str(edge_id_uuid),

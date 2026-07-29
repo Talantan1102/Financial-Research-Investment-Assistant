@@ -13,6 +13,7 @@ import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Literal
+from uuid import uuid4
 
 # Collection imports the synchronous database module before opt-in Compose
 # fixtures can provide isolated credentials. Keep the fallback test-only.
@@ -419,3 +420,25 @@ def pg_async_session_factory(pg_test_container: dict[str, object]) -> Iterator[o
     yield factory
     # Use sync_engine.dispose() to clean up without needing an event loop in teardown
     engine.sync_engine.dispose()
+
+
+@pytest.fixture(scope="session")
+def disposable_eval_runtime(pg_test_container: dict[str, object]):
+    """One physical throwaway database for strict business-eval integration tests."""
+    from eval.chatloop.disposable_runtime import DisposableEvalRuntime
+
+    admin_dsn = (
+        f"postgresql://{pg_test_container['user']}:{pg_test_container['password']}"
+        f"@{pg_test_container['host']}:{pg_test_container['port']}/postgres"
+    )
+    runtime = DisposableEvalRuntime.provision(
+        admin_dsn=admin_dsn,
+        run_id=f"pytest-{uuid4().hex}",
+    )
+    yield runtime
+    runtime.close()
+
+
+@pytest.fixture
+def disposable_eval_async_session_factory(disposable_eval_runtime):
+    return disposable_eval_runtime.async_session_factory

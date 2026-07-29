@@ -163,10 +163,13 @@ class PersistentToolLedger:
         )
 
     async def fail(self, reservation: Any, result: ToolResult) -> None:
+        error_code = getattr(result, "error_code", "tool_error")
+        if not isinstance(error_code, str) or not error_code:
+            error_code = "tool_error"
         await self._attempts.fail_tool_execution(
             self._assignment,
             reservation.idempotency_key,
-            error_code="tool_error",
+            error_code=error_code,
             error_message=result.error or "Tool execution failed.",
             reservation_token=reservation.reservation_token,
             execution_epoch=reservation.execution_epoch,
@@ -427,7 +430,7 @@ class DurableToolHub:
 @dataclass
 class _ComponentsProxy:
     llm: Any
-    tool_hub: DurableToolHub
+    tool_hub: Any
     gate_cfg: Any
     skill_listing: str
     system_prompt: str
@@ -476,6 +479,7 @@ def build_chat_executor_builder(
     provider: str,
     model: str,
     risk_policy: ToolRiskPolicy,
+    tool_hub_decorator: Callable[[Any], Any] | None = None,
 ) -> ExecutorBuilder:
     """Create the production builder while retaining per-Attempt event/ledger state."""
     from app.chatloop.events import SeqCounter
@@ -502,8 +506,11 @@ def build_chat_executor_builder(
         def components_factory(emit: Any, seq_counter: SeqCounter) -> _ComponentsProxy:
             components = build_turn_components(singletons, emit=emit, seq_counter=seq_counter)
             components.tool_hub.register_inprocess([AskUserTool(), ApprovalTool()])
+            base_hub = components.tool_hub
+            if tool_hub_decorator is not None:
+                base_hub = tool_hub_decorator(base_hub)
             durable_hub = DurableToolHub(
-                components.tool_hub,
+                base_hub,
                 ledger,
                 approved,
                 risk_policy,
